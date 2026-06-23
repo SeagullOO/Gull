@@ -1,0 +1,46 @@
+const { contextBridge, ipcRenderer } = require("electron");
+
+contextBridge.exposeInMainWorld("electronAPI", {
+  // Generic IPC
+  send: (channel, ...args) => ipcRenderer.send(channel, ...args),
+  invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
+
+  // File-based storage
+  readFile: (filename) => ipcRenderer.invoke("fs:readFile", filename),
+  writeFile: (filename, data) => ipcRenderer.invoke("fs:writeFile", filename, data),
+  deleteFile: (filename) => ipcRenderer.invoke("fs:deleteFile", filename),
+  listFiles: () => ipcRenderer.invoke("fs:listFiles"),
+
+  // Export
+  selectExportFolder: () => ipcRenderer.invoke("export:selectFolder"),
+  writeExportFiles: (basePath, files) => ipcRenderer.invoke("export:writeFiles", basePath, files),
+
+  // Dialog / file system
+  selectFolder: () => ipcRenderer.invoke("dialog:selectFolder"),
+  readDir: (dirPath) => ipcRenderer.invoke("fs:readDir", dirPath),
+  readFileAt: (filePath) => ipcRenderer.invoke("fs:readFileAt", filePath),
+
+  // Zoom
+  setZoomFactor: (factor) => ipcRenderer.invoke("zoom:setFactor", factor),
+
+  // Window controls
+  windowClose: () => ipcRenderer.send("window-close"),
+  windowMinimize: () => ipcRenderer.send("window-minimize"),
+  windowMaximize: () => ipcRenderer.send("window-maximize"),
+
+  // Max/unmax state listener
+  onMaximizeChange: (cb) => {
+    ipcRenderer.on("window-maximized", () => cb(true));
+    ipcRenderer.on("window-unmaximized", () => cb(false));
+  },
+
+  // ── Auto-updater ──────────────────────────────────────────────────────
+  checkForUpdates: () => ipcRenderer.invoke("update:check"),
+  downloadUpdate: () => ipcRenderer.invoke("update:download"),
+  installUpdate: () => ipcRenderer.invoke("update:install"),
+  onUpdateStatus: (cb) => {
+    const events = ["update:checking", "update:available", "update:not-available", "update:progress", "update:downloaded", "update:error"];
+    events.forEach((e) => ipcRenderer.on(e, (_ev, data) => cb(e.replace("update:", ""), data)));
+    return () => events.forEach((e) => ipcRenderer.removeAllListeners(e));
+  },
+});

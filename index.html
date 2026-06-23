@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>游戏策划文档工具</title>
+    <link rel="stylesheet" href="/vendor/handsontable.full.min.css" />
+    <style>
+      /* Override Handsontable CSS for dark mode — uses CSS variables for theme compatibility */
+      .handsontable td,.handsontable th,.htCore td,.htCore th{background:var(--bg-root,#1e1e1e);color:var(--text-primary,#dadada);border-color:var(--border-subtle,rgba(255,255,255,0.06))!important}
+      .handsontable{background:var(--bg-root,#1e1e1e)!important}
+      .wtHolder{background:transparent!important}
+      .ht_clone_top,.ht_clone_left,.ht_clone_top_left_corner,.ht_master{background:transparent!important}
+      /* wtBorder accent color — visible selection outline */
+      .handsontable .wtBorder{background-color:var(--accent,#a882ff)!important}
+      .ht_master td.current{box-shadow:inset 0 0 0 2px var(--accent,#a882ff)!important}
+      textarea.handsontableInput{background:var(--bg-surface,#2a2a2a)!important;color:var(--text-primary,#dadada)!important;border-color:var(--accent,#a882ff)!important}
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <!-- Handsontable + HyperFormula: vendored for offline use, deferred to not block page render -->
+    <script defer src="/vendor/handsontable.full.min.js"></script>
+    <script defer src="/vendor/hyperformula.full.min.js"></script>
+  </body>
+</html>
