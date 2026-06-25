@@ -35,8 +35,10 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { storageGetFolder, storageUpdateFolder } from "../storage";
+import { storageGetFolder, storageUpdateFolder, storageWriteWorkspaceFileBinary, storageDeleteWorkspaceFile } from "../storage";
 import { restoreMetaUndo, pushMetaUndo } from "../hooks/useMetaUndo";
+import { dataToXlsxBase64, xlsxBase64ToData } from "../utils/xlsxUtils";
+import { KEYBINDINGS, matchesKey } from "../config";
 import type { FolderFile } from "../types";
 
 /** 默认空 Excel 内容（26 列 x 100 行） */
@@ -60,29 +62,69 @@ const defaultExcelContent = (() => {
  * @param delay    防抖延迟（毫秒），默认 500ms
  * @returns 触发定时保存的函数（可多次调用）
  */
-function saveExcelContent(hot: any, folderId: number, fileId: string, onReload: () => void, delay = 500) {
+function saveExcelContent(hot: any, folderId: number, folderName: string | null, fileId: string, fileName: string, currentFile: FolderFile | null, fmtMapRef: React.MutableRefObject<Record<string, Record<string, any>>>, delay = 500) {
   let timer: ReturnType<typeof setTimeout>;
+  /** 用于跟踪上一次成功保存的数据，避免重复写入相同内容 */
+  let lastSavedContent = "";
+
   const save = async () => {
     if (!hot || hot.isDestroyed) return;
-    const folder = await storageGetFolder(folderId);
-    if (!folder) return;
     const rowCount = hot.countRows();
     const colCount = hot.countCols();
-    // 收集所有单元格的样式元数据（_color, _bgColor, _bold, _italic, _fontSize）
-    const cellMeta: any[][] = [];
-    for (let r = 0; r < rowCount; r++) {
-      const row: any[] = [];
-      for (let c = 0; c < colCount; c++) {
-        const m = hot.getCellMeta(r, c);
-        row.push({ _color: m._color, _bgColor: m._bgColor, _bold: m._bold, _italic: m._italic, _fontSize: m._fontSize });
+    const data = hot.getData();
+    const colHeaders = hot.getColHeader();
+
+    /** 从 fmtMap 构建 cellMeta 二维数组 */
+    const buildCellMeta = (): any[][] => {
+      const meta: any[][] = [];
+      for (let r = 0; r < rowCount; r++) {
+        const row: any[] = [];
+        for (let c = 0; c < colCount; c++) {
+          row.push(fmtMapRef.current[`${r},${c}`] || {});
+        }
+        meta.push(row);
       }
-      cellMeta.push(row);
+      return meta;
+    };
+
+    const cellMetaArr = buildCellMeta();
+    const newContent = { data, colHeaders, cellMeta: cellMetaArr };
+
+    // 快速检查：如果内容与上次保存的完全相同则跳过
+    const contentFingerprint = JSON.stringify({ data, colHeaders, cellMeta: cellMetaArr });
+    if (contentFingerprint === lastSavedContent) return;
+
+    if (folderName && (window as any).electronAPI) {
+      // Electron: 序列化为 base64 xlsx 并写入二进制文件
+      const xlsxBase64 = await dataToXlsxBase64(data, colHeaders, cellMetaArr);
+      // 将文件名中的旧扩展名替换为 .xlsx
+      const xlsxFileName = fileName.replace(/\.(csv|xlsx)$/i, ".xlsx");
+      if (!xlsxFileName.endsWith(".xlsx")) {
+        // 文件名没有已知扩展名，添加 .xlsx
+      }
+      const finalName = xlsxFileName.endsWith(".xlsx") ? xlsxFileName : xlsxFileName + ".xlsx";
+      await storageWriteWorkspaceFileBinary(folderName, finalName, xlsxBase64);
+
+      // 如果是 legacy .csv 文件，迁移到 .xlsx 并清理旧文件
+      if (finalName !== fileName) {
+        await storageDeleteWorkspaceFile(folderName, fileName);
+        await storageDeleteWorkspaceFile(folderName, fileName + ".meta");
+        if (currentFile) { currentFile.name = finalName; }
+      }
+
+      if (currentFile) { currentFile.content = newContent; currentFile.updatedAt = Date.now(); }
+      lastSavedContent = contentFingerprint;
+    } else {
+      // Browser/IndexedDB: 存储为 base64 xlsx 字符串
+      const xlsxBase64 = await dataToXlsxBase64(data, colHeaders, cellMetaArr);
+      const folder = await storageGetFolder(folderId);
+      if (!folder) return;
+      const files = folder.files.map((f) =>
+        f.id === fileId ? { ...f, content: xlsxBase64, updatedAt: Date.now() } : f
+      );
+      await storageUpdateFolder(folderId, { files, updatedAt: Date.now() });
+      lastSavedContent = contentFingerprint;
     }
-    const files = folder.files.map((f) =>
-      f.id === fileId ? { ...f, content: { data: hot.getData(), colHeaders: hot.getColHeader(), cellMeta }, updatedAt: Date.now() } : f
-    );
-    await storageUpdateFolder(folderId, { files, updatedAt: Date.now() });
-    onReload();
   };
   return () => { clearTimeout(timer); timer = setTimeout(save, delay); };
 }
@@ -94,7 +136,7 @@ function saveExcelContent(hot: any, folderId: number, fileId: string, onReload: 
  * @param folderId     当前工作区文件夹 ID
  * @param reloadFolder 重新加载文件夹的回调
  */
-export function useExcelEditor(currentFile: FolderFile | null, folderId: number | null, reloadFolder: () => void) {
+export function useExcelEditor(currentFile: FolderFile | null, folderId: number | null, folderName: string | null, reloadFolder: () => void) {
   /** DOM 容器 ref，Handsontable 将渲染到此 div 内 */
   const hotRef = useRef<HTMLDivElement>(null);
   /** Handsontable 实例 ref（通过 new Handsontable() 创建） */
@@ -107,6 +149,21 @@ export function useExcelEditor(currentFile: FolderFile | null, folderId: number 
   const [formulaValue, setFormulaValue] = useState("");
   /** 编辑栏是否获得焦点：聚焦时不覆盖用户正在编辑的值 */
   const isFormulaBarFocused = useRef(false);
+  // 单元格格式表：key = "行,列"，value = { _color, _bgColor, ... }
+  // 独立维护，不依赖 Handsontable 的 cellMeta 兼容性
+  const fmtMap = useRef<Record<string, Record<string, any>>>({});
+  /** 暴露给 ExcelToolbar 调用：记录格式变更 */
+  const recordFmt = (r: number, c: number, key: string, val: any) => {
+    const k = `${r},${c}`;
+    if (!fmtMap.current[k]) fmtMap.current[k] = {};
+    if (val === undefined || val === null || val === "") {
+      delete fmtMap.current[k][key];
+      if (Object.keys(fmtMap.current[k]).length === 0) delete fmtMap.current[k];
+    } else {
+      fmtMap.current[k][key] = val;
+    }
+  };
+  (window as any).__recordFmt = recordFmt;
 
   // ─── Excel/Handsontable 初始化 ──────────────────────────────────────────
   // 仅在 currentFile.id 变化时触发（不依赖 content 对象引用）
@@ -147,7 +204,7 @@ export function useExcelEditor(currentFile: FolderFile | null, folderId: number 
        * 优先从元数据撤销栈恢复（样式变更），若栈为空则回退到 Handsontable 内置 undo
        */
       beforeKeyDown: function (this: any, event: KeyboardEvent) {
-        if ((event.ctrlKey || event.metaKey) && event.key === "z" && !event.shiftKey) {
+        if (matchesKey(event, KEYBINDINGS.excelUndo) && !event.shiftKey) {
           if (restoreMetaUndo(this)) { event.preventDefault(); event.stopImmediatePropagation(); }
         }
       },
@@ -164,7 +221,8 @@ export function useExcelEditor(currentFile: FolderFile | null, folderId: number 
     (window as any).__ctxHot = hot;
     (window as any).__pushMetaUndo = pushMetaUndo;
 
-    // 恢复保存的单元格样式元数据（需要 hot.render() 才能生效）
+    // 恢复保存的单元格样式元数据（同时填充 fmtMap 和 Handsontable meta）
+    fmtMap.current = {};
     const savedMeta = content.cellMeta;
     if (savedMeta) {
       for (let r = 0; r < savedMeta.length; r++) {
@@ -172,7 +230,8 @@ export function useExcelEditor(currentFile: FolderFile | null, folderId: number 
         if (!metaRow) continue;
         for (let c = 0; c < metaRow.length; c++) {
           const meta = metaRow[c];
-          if (!meta) continue;
+          if (!meta || Object.keys(meta).length === 0) continue;
+          fmtMap.current[`${r},${c}`] = { ...meta };
           for (const [key, value] of Object.entries(meta)) {
             if (value !== undefined) hot.setCellMeta(r, c, key, value);
           }
@@ -183,7 +242,8 @@ export function useExcelEditor(currentFile: FolderFile | null, folderId: number 
 
     setHotKey((k) => k + 1);
     // 注册自动保存 hook：监听所有数据/行列变化，500ms 防抖后保存
-    const saveFn = saveExcelContent(hot, folderId!, currentFile.id, reloadFolder);
+    const saveFn = saveExcelContent(hot, folderId!, folderName, currentFile.id, currentFile.name, currentFile, fmtMap);
+    (window as any).__triggerExcelSave = saveFn;
     hot.addHook("afterChange", saveFn);
     hot.addHook("afterCreateRow", saveFn);
     hot.addHook("afterCreateCol", saveFn);
@@ -267,6 +327,79 @@ export function useExcelEditor(currentFile: FolderFile | null, folderId: number 
     };
     // currentFile?.id 是唯一依赖项：仅当切换到不同文件时才重建编辑器
   }, [currentFile?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── 内容更新（磁盘加载后 / IndexedDB 加载后）──────────────────────
+  // 场景：编辑器已用占位数据初始化，但内容异步加载后发生了变化。
+  // Electron: FolderWorkspace 磁盘加载 → setFolder → currentFile.content 更新
+  // Browser: IndexedDB 返回 base64 xlsx 字符串 → 需要解析
+  useEffect(() => {
+    const hot = hotInstance.current;
+    if (!hot || hot.isDestroyed || !currentFile) return;
+    const content = currentFile.content;
+    if (!content) return;
+
+    // Browser/IndexedDB 模式：content 是 base64 xlsx 字符串，需要解析
+    if (typeof content === "string") {
+      if (content.length === 0) return;
+      xlsxBase64ToData(content).then((parsed) => {
+        if (!hot || hot.isDestroyed) return;
+        if (parsed.data && parsed.data.length > 0 && parsed.data[0]?.length > 0) {
+          hot.loadData(parsed.data);
+        }
+        if (parsed.cellMeta && parsed.cellMeta.length > 0) {
+          fmtMap.current = {};
+          for (let r = 0; r < parsed.cellMeta.length; r++) {
+            const metaRow = parsed.cellMeta[r];
+            if (!metaRow) continue;
+            for (let c = 0; c < metaRow.length; c++) {
+              const meta = metaRow[c];
+              if (!meta || Object.keys(meta).length === 0) continue;
+              fmtMap.current[`${r},${c}`] = { ...meta };
+              for (const [key, value] of Object.entries(meta)) {
+                if (value !== undefined) hot.setCellMeta(r, c, key, value);
+              }
+            }
+          }
+          hot.render();
+        }
+        // 缓存解析后的内容，避免重复解析
+        if (currentFile) { currentFile.content = parsed; }
+      }).catch(() => { /* parse failed, keep placeholder */ });
+      return;
+    }
+
+    // Electron/内部模型：content 是 {data, colHeaders, cellMeta} 对象
+    const savedMeta = (content as any).cellMeta as any[][] | undefined;
+    const contentData = (content as any).data as string[][] | undefined;
+
+    // 如果数据维度与当前不同（从占位变为实际数据），加载数据
+    if (contentData && contentData.length > 0 && contentData[0]?.length > 0) {
+      const currentRows = hot.countRows();
+      const currentCols = hot.countCols();
+      const isPlaceholder = currentRows <= 1 && currentCols <= 1;
+      if (isPlaceholder || contentData.length !== currentRows || contentData[0].length !== currentCols) {
+        hot.loadData(contentData);
+      }
+    }
+
+    // 恢复 cellMeta
+    if (savedMeta && savedMeta.length > 0) {
+      fmtMap.current = {};
+      for (let r = 0; r < savedMeta.length; r++) {
+        const metaRow = savedMeta[r];
+        if (!metaRow) continue;
+        for (let c = 0; c < metaRow.length; c++) {
+          const meta = metaRow[c];
+          if (!meta || Object.keys(meta).length === 0) continue;
+          fmtMap.current[`${r},${c}`] = { ...meta };
+          for (const [key, value] of Object.entries(meta)) {
+            if (value !== undefined) hot.setCellMeta(r, c, key, value);
+          }
+        }
+      }
+      hot.render();
+    }
+  }, [currentFile?.content]);
 
   const handleUndo = useCallback(() => {
     const hot = hotInstance.current;

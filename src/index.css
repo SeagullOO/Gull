@@ -1114,14 +1114,14 @@ body {
 .hot-container .ht_clone_top td.area::before,
 .hot-container .ht_clone_left td.area::before,
 .hot-container .ht_clone_top_left_corner td.area::before {
-  background: rgba(168, 130, 255, 0.55) !important;
+  background: rgba(168, 130, 255, 1) !important;
 }
 /* Light mode */
 :root.light .hot-container .ht_master td.area::before,
 :root.light .hot-container .ht_clone_top td.area::before,
 :root.light .hot-container .ht_clone_left td.area::before,
 :root.light .hot-container .ht_clone_top_left_corner td.area::before {
-  background: rgba(168, 130, 255, 0.45) !important;
+  background: rgb(154, 111, 255) !important;
 }
 
 /**

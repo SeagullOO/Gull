@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { storageLoadFolders } from "../storage";
 import type { Folder, FolderFile } from "../types";
 import { t, getLang } from "../i18n";
+import { KEYBINDINGS } from "../config";
 
 /**
  * GlobalSearchModal — 全局文件搜索弹窗（模仿 VS Code Ctrl+P 文件搜索）
@@ -92,15 +93,15 @@ function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
   // 键盘导航：ArrowUp/ArrowDown 移动高亮索引，Enter 选中，Escape 关闭
   // preventDefault 阻止 ArrowUp/Down 导致输入框光标移动
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape") {
+    if (e.key === KEYBINDINGS.closePanel.key) {
       onClose();
-    } else if (e.key === "ArrowDown") {
-      e.preventDefault(); // 阻止光标移动到输入框末尾
+    } else if (e.key === KEYBINDINGS.searchNext.key) {
+      e.preventDefault();
       setSelectedIdx((prev) => Math.min(prev + 1, results.length - 1));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault(); // 阻止光标移动到输入框开头
+    } else if (e.key === KEYBINDINGS.searchPrev.key) {
+      e.preventDefault();
       setSelectedIdx((prev) => Math.max(prev - 1, 0));
-    } else if (e.key === "Enter" && results[selectedIdx]) {
+    } else if (e.key === KEYBINDINGS.searchOpen.key && results[selectedIdx]) {
       handleSelect(results[selectedIdx]);
     }
   };
@@ -108,7 +109,7 @@ function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === KEYBINDINGS.closePanel.key) onClose();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);

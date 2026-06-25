@@ -7,7 +7,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // File-based storage
   readFile: (filename) => ipcRenderer.invoke("fs:readFile", filename),
+  readFileBinary: (filename) => ipcRenderer.invoke("fs:readFileBinary", filename),
   writeFile: (filename, data) => ipcRenderer.invoke("fs:writeFile", filename, data),
+  writeFileBinary: (filename, base64Data) => ipcRenderer.invoke("fs:writeFileBinary", filename, base64Data),
   deleteFile: (filename) => ipcRenderer.invoke("fs:deleteFile", filename),
   listFiles: () => ipcRenderer.invoke("fs:listFiles"),
   // Workspace filesystem
@@ -25,6 +27,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   selectFolder: () => ipcRenderer.invoke("dialog:selectFolder"),
   readDir: (dirPath) => ipcRenderer.invoke("fs:readDir", dirPath),
   readFileAt: (filePath) => ipcRenderer.invoke("fs:readFileAt", filePath),
+  readFileAtBinary: (filePath) => ipcRenderer.invoke("fs:readFileAtBinary", filePath),
 
   // Shell
   getDataPath: () => ipcRenderer.invoke("getDataPath"),

@@ -14,7 +14,9 @@ declare global {
   interface Window {
     electronAPI?: {
       readFile: (filename: string) => Promise<string | null>;
+      readFileBinary: (filename: string) => Promise<string | null>;
       writeFile: (filename: string, data: string) => Promise<boolean>;
+      writeFileBinary: (filename: string, base64Data: string) => Promise<boolean>;
       deleteFile: (filename: string) => Promise<boolean>;
       listFiles: () => Promise<{ name: string; isDirectory: boolean }[]>;
       mkdir: (dirPath: string) => Promise<boolean>;
@@ -23,10 +25,11 @@ declare global {
       listDir: (dirPath: string) => Promise<{ name: string; path: string; isDirectory: boolean }[]>;
       copyWorkspace: (srcDir: string) => Promise<string | null>;
       selectExportFolder: () => Promise<string | null>;
-      writeExportFiles: (basePath: string, files: { relativePath: string; content: string }[]) => Promise<{ success: boolean; error?: string; count: number }>;
+      writeExportFiles: (basePath: string, files: { relativePath: string; content: string; encoding?: "base64" }[]) => Promise<{ success: boolean; error?: string; count: number }>;
       selectFolder: () => Promise<string | null>;
       readDir: (dirPath: string) => Promise<{ name: string; isDirectory: boolean; isFile: boolean }[]>;
       readFileAt: (filePath: string) => Promise<string | null>;
+      readFileAtBinary: (filePath: string) => Promise<string | null>;
       setZoomFactor: (factor: number) => void;
       checkForUpdates: () => Promise<{ dev?: boolean; success?: boolean; version?: string; error?: string }>;
       downloadUpdate: () => Promise<{ success?: boolean; error?: string }>;
@@ -62,6 +65,43 @@ function nameToId(name: string): number {
 }
 /** 数字 ID → 目录名。loadFolders 时建立反向映射，存入 window.__folderNameMap */
 let nameMap: Map<number, string> = new Map();
+
+// ── CSV helpers（保留用于 legacy .csv 文件兼容） ─────────────────────────
+
+export function dataToCsv(data: string[][]): string {
+  return data.map(row =>
+    row.map(cell => {
+      const s = cell ?? "";
+      return (s.includes(",") || s.includes("\n") || s.includes('"')) ? `"${s.replace(/"/g, '""')}"` : s;
+    }).join(",")
+  ).join("\n");
+}
+
+export function csvToData(csv: string): string[][] {
+  const lines = csv.split("\n");
+  const result: string[][] = [];
+  for (const line of lines) {
+    const row: string[] = [];
+    let cell = "";
+    let inQuote = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (inQuote) {
+        if (ch === '"') {
+          if (line[i + 1] === '"') { cell += '"'; i++; }
+          else { inQuote = false; }
+        } else { cell += ch; }
+      } else {
+        if (ch === '"') { inQuote = true; }
+        else if (ch === ",") { row.push(cell); cell = ""; }
+        else { cell += ch; }
+      }
+    }
+    row.push(cell);
+    result.push(row);
+  }
+  return result;
+}
 
 /** 列出 dataPath 下所有子目录 → 每个子目录即一个工作区 */
 export async function storageLoadFolders(): Promise<Folder[]> {
@@ -133,6 +173,9 @@ export async function storageUpdateFolder(id: number, changes: Partial<Folder>):
 // 工作区文件系统操作（Electron only）
 // ═══════════════════════════════════════════════════════════════════════════
 
+/** Excel 文件扩展名列表 */
+const EXCEL_EXTENSIONS = ["xlsx", "csv"];
+
 /** 列出工作区目录下的所有文件和文件夹 */
 export async function storageListWorkspaceFiles(folderName: string): Promise<{ files: FolderFile[]; folders: string[] }> {
   if (!isElectron) return { files: [], folders: [] };
@@ -143,8 +186,13 @@ export async function storageListWorkspaceFiles(folderName: string): Promise<{ f
     if (e.isDirectory) {
       folderPaths.push(e.path);
     } else {
+      // 跳过 .meta 元数据文件（legacy CSV 配套文件）
+      if (e.name.endsWith(".meta")) continue;
       const ext = e.name.split(".").pop()?.toLowerCase();
-      const type = ext === "md" ? "md" : "excel";
+      let type: "md" | "excel" | null = null;
+      if (ext === "md") type = "md";
+      else if (ext && EXCEL_EXTENSIONS.includes(ext)) type = "excel";
+      else continue; // 忽略不识别文件
       folderFileMap.set(e.path, {
         id: generateId(), name: e.path, type,
         content: type === "md" ? "" : { data: [[]] },
@@ -158,19 +206,32 @@ export async function storageListWorkspaceFiles(folderName: string): Promise<{ f
   return { files, folders: folderPaths };
 }
 
-/** 读工作区中的文件内容 */
+/** 读工作区中的文件内容（文本） */
 export async function storageReadWorkspaceFile(folderName: string, relPath: string): Promise<string | null> {
   if (!isElectron) return null;
   return window.electronAPI!.readFile(`${folderName}/${relPath}`);
 }
 
-/** 写/创建工作区文件 */
+/** 读工作区中的文件内容（二进制 base64） */
+export async function storageReadWorkspaceFileBinary(folderName: string, relPath: string): Promise<string | null> {
+  if (!isElectron) return null;
+  return window.electronAPI!.readFileBinary(`${folderName}/${relPath}`);
+}
+
+/** 写/创建工作区文件（文本） */
 export async function storageWriteWorkspaceFile(folderName: string, relPath: string, content: string): Promise<boolean> {
   if (!isElectron) return false;
-  // 确保父目录存在
   const dir = relPath.includes("/") ? relPath.split("/").slice(0, -1).join("/") : "";
   if (dir) await window.electronAPI!.mkdir(`${folderName}/${dir}`);
   return window.electronAPI!.writeFile(`${folderName}/${relPath}`, content);
+}
+
+/** 写/创建工作区文件（二进制 base64） */
+export async function storageWriteWorkspaceFileBinary(folderName: string, relPath: string, base64Content: string): Promise<boolean> {
+  if (!isElectron) return false;
+  const dir = relPath.includes("/") ? relPath.split("/").slice(0, -1).join("/") : "";
+  if (dir) await window.electronAPI!.mkdir(`${folderName}/${dir}`);
+  return window.electronAPI!.writeFileBinary(`${folderName}/${relPath}`, base64Content);
 }
 
 /** 删除工作区文件 */
@@ -182,7 +243,6 @@ export async function storageDeleteWorkspaceFile(folderName: string, relPath: st
 /** 重命名/移动工作区文件或目录 */
 export async function storageRenameWorkspaceEntry(folderName: string, oldPath: string, newPath: string): Promise<boolean> {
   if (!isElectron) return false;
-  // 确保目标父目录存在
   const dir = newPath.includes("/") ? newPath.split("/").slice(0, -1).join("/") : "";
   if (dir) await window.electronAPI!.mkdir(`${folderName}/${dir}`);
   return window.electronAPI!.rename(`${folderName}/${oldPath}`, `${folderName}/${newPath}`);
@@ -236,7 +296,7 @@ export async function storageDeleteTemplate(id: number): Promise<void> {
 // 导出
 // ═══════════════════════════════════════════════════════════════════════════
 
-export async function storageExportFiles(files: { relativePath: string; content: string }[]): Promise<string> {
+export async function storageExportFiles(files: { relativePath: string; content: string; encoding?: "base64" }[]): Promise<string> {
   if (isElectron) {
     const basePath = await window.electronAPI!.selectExportFolder();
     if (!basePath) throw new Error("AbortError");
@@ -245,15 +305,31 @@ export async function storageExportFiles(files: { relativePath: string; content:
     return `已导出 ${result.count} 个文件`;
   }
   files.forEach((f) => {
-    const blob = new Blob([f.content], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = f.relativePath.split("/").pop() || f.relativePath;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    if (f.encoding === "base64") {
+      // 将 base64 解码为二进制 blob 下载
+      const binaryStr = atob(f.content);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+      const blob = new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = f.relativePath.split("/").pop() || f.relativePath;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } else {
+      const blob = new Blob([f.content], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = f.relativePath.split("/").pop() || f.relativePath;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
   });
   return `已下载 ${files.length} 个文件`;
 }

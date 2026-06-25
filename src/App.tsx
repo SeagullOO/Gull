@@ -35,7 +35,7 @@ import { useState, useEffect, Component } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import FolderWorkspace from "./pages/FolderWorkspace";
 import TemplateManager from "./components/TemplateManager";
-import { ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT, ZOOM_REFERENCE } from "./config";
+import { ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT, ZOOM_REFERENCE, CONTENT_ZOOM_MIN, CONTENT_ZOOM_MAX, CONTENT_ZOOM_DEFAULT } from "./config";
 import Settings from "./pages/Settings";
 import TitleBar from "./components/TitleBar";
 import GlobalSearchModal from "./components/GlobalSearchModal";
@@ -128,14 +128,14 @@ function App() {
   useEffect(() => {
     let theme: Theme = "dark";
     let z = ZOOM_DEFAULT;
-    let cz = 100;
+    let cz = CONTENT_ZOOM_DEFAULT;
     try {
       const raw = localStorage.getItem("gull_settings");
       if (raw) {
         const p = JSON.parse(raw);
         if (["dark", "light", "system"].includes(p.theme)) theme = p.theme;
         if (typeof p.zoom === "number" && p.zoom >= ZOOM_MIN && p.zoom <= ZOOM_MAX) z = p.zoom;
-        if (typeof p.contentZoom === "number" && p.contentZoom >= ZOOM_MIN && p.contentZoom <= ZOOM_MAX) cz = p.contentZoom;
+        if (typeof p.contentZoom === "number" && p.contentZoom >= CONTENT_ZOOM_MIN && p.contentZoom <= CONTENT_ZOOM_MAX) cz = p.contentZoom;
       }
     } catch {}
     applyThemeClass(theme);
@@ -144,12 +144,12 @@ function App() {
     // 将内容缩放值暴露到全局，供非 React 代码读取
     (window as any).__contentZoom = cz;
     // 在下一帧应用内容缩放，确保 DOM 已渲染
-    if (cz !== 100) {
+    if (cz !== CONTENT_ZOOM_DEFAULT) {
       requestAnimationFrame(() => {
         const el = document.querySelector("[data-workspace-zoom]") as HTMLElement | null;
-        // 补偿父级 UI 缩放，确保编辑器有效缩放 = contentZoom / 100
+        // 补偿父级 UI 缩放，确保编辑器有效缩放 = contentZoom / CONTENT_ZOOM_DEFAULT
         const uiZoomCss = z !== ZOOM_REFERENCE ? z / ZOOM_REFERENCE : 1;
-        if (el) (el.style as any).zoom = String((cz / 100) / uiZoomCss);
+        if (el) (el.style as any).zoom = String((cz / CONTENT_ZOOM_DEFAULT) / uiZoomCss);
       });
     }
     // 缩放由 CSS zoom 统一管理，不通过 Electron setZoomFactor，避免异步时序导致窗口大小不一致

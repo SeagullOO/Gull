@@ -1,4 +1,5 @@
 import React from "react";
+import { KEYBINDINGS } from "../config";
 
 /**
  * FormulaBar — 公式栏组件（模仿 Excel 公式栏）
@@ -66,9 +67,9 @@ function FormulaBar({
         onBlur={() => { isFormulaBarFocused.current = false; }}
         onKeyDown={(e) => {
           // Enter: 提交当前编辑（通过 blur 触发 onBlur 中的提交逻辑）
-          if (e.key === "Enter") {
+          if (e.key === KEYBINDINGS.confirm.key) {
             (e.target as HTMLInputElement).blur();
-          } else if (e.key === "Escape") {
+          } else if (e.key === KEYBINDINGS.cancel.key) {
             // Escape: 从 Handsontable 读取原始值并恢复，然后失焦取消编辑
             if (hot && !hot.isDestroyed) {
               const sel = hot.getSelected();

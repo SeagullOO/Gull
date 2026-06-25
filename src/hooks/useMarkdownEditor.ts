@@ -29,7 +29,7 @@
 
 import { useEffect, useRef, useCallback, useState } from "react";
 import type * as Monaco from "monaco-editor";
-import { storageGetFolder, storageUpdateFolder } from "../storage";
+import { storageGetFolder, storageUpdateFolder, storageWriteWorkspaceFile } from "../storage";
 import type { FolderFile } from "../types";
 import { extractTextFromJson } from "./markdown-converter";
 
@@ -44,6 +44,7 @@ import { extractTextFromJson } from "./markdown-converter";
 export function useMarkdownEditor(
   currentFile: FolderFile | null,
   folderId: number | null,
+  folderName: string | null,
   saveStatus: "saved" | "saving" | "unsaved",
   setSaveStatus: (status: "saved" | "saving" | "unsaved") => void,
 ) {
@@ -108,14 +109,18 @@ export function useMarkdownEditor(
       const text = source;
       setSaveStatus("saving");
       try {
-        const f = await storageGetFolder(folderId);
-        if (!f) return;
-        const files = f.files.map((file) =>
-          file.id === fileId
-            ? { ...file, content: text, updatedAt: Date.now() }
-            : file,
-        );
-        await storageUpdateFolder(folderId, { files, updatedAt: Date.now() });
+        if (currentFile && folderName && (window as any).electronAPI) {
+          await storageWriteWorkspaceFile(folderName, currentFile.name, text);
+        } else {
+          const f = await storageGetFolder(folderId);
+          if (!f) return;
+          const files = f.files.map((file) =>
+            file.id === fileId
+              ? { ...file, content: text, updatedAt: Date.now() }
+              : file,
+          );
+          await storageUpdateFolder(folderId, { files, updatedAt: Date.now() });
+        }
         fileCache.current[fileId] = text;
         lastSaved.current = text;
         setSaveStatus("saved");
@@ -140,14 +145,18 @@ export function useMarkdownEditor(
     const fileId = currentFile.id;
     setSaveStatus("saving");
     try {
-      const f = await storageGetFolder(folderId);
-      if (!f) return;
-      const files = f.files.map((file) =>
-        file.id === fileId
-          ? { ...file, content: text, updatedAt: Date.now() }
-          : file,
-      );
-      await storageUpdateFolder(folderId, { files, updatedAt: Date.now() });
+      if (folderName && (window as any).electronAPI) {
+        await storageWriteWorkspaceFile(folderName, currentFile.name, text);
+      } else {
+        const f = await storageGetFolder(folderId);
+        if (!f) return;
+        const files = f.files.map((file) =>
+          file.id === fileId
+            ? { ...file, content: text, updatedAt: Date.now() }
+            : file,
+        );
+        await storageUpdateFolder(folderId, { files, updatedAt: Date.now() });
+      }
       fileCache.current[fileId] = text;
       lastSaved.current = text;
       setSaveStatus("saved");

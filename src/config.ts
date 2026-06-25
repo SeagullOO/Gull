@@ -17,6 +17,12 @@ export const ZOOM_STEP = 10;
 /** CSS zoom 的基准值：此值表示 1:1 无缩放 */
 export const ZOOM_REFERENCE = 100;
 
+/** 内容缩放（编辑器区域）默认/最小/最大/步长 */
+export const CONTENT_ZOOM_DEFAULT = 100;
+export const CONTENT_ZOOM_MIN = 50;
+export const CONTENT_ZOOM_MAX = 200;
+export const CONTENT_ZOOM_STEP = 10;
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Colors — 统一颜色变量（映射到 CSS 变量，放在最前面以便其他常量引用）
 // ═══════════════════════════════════════════════════════════════════════════
@@ -71,7 +77,7 @@ export const TREE_GUIDE_OFFSET = 10;
 export const TREE_GUIDE_HIGHLIGHT_WIDTH = 1;
 
 /** 文件树：选中文件夹的引导线高亮颜色（与文件夹箭头同色） */
-export const TREE_GUIDE_HIGHLIGHT_COLOR = COLOR_TEXT_SECONDARY;
+export const TREE_GUIDE_HIGHLIGHT_COLOR = "var(--accent)";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Window — Electron 窗口默认值 | 同步自 electron/main.js
@@ -84,6 +90,60 @@ export const WINDOW_MIN_HEIGHT = 400;
 
 /** 文件读取最大字节数 (10MB) | 同步自 electron/main.js */
 export const MAX_FILE_READ_SIZE = 10 * 1024 * 1024;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Keyboard Shortcuts — 所有快捷键集中定义
+// 后期可由此扩展为用户自定义键位配置
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface KeyBinding {
+  key: string;
+  ctrl?: boolean;
+  shift?: boolean;
+  alt?: boolean;
+}
+
+/** 检查键盘事件是否匹配快捷键定义 */
+export function matchesKey(e: KeyboardEvent | React.KeyboardEvent, binding: KeyBinding): boolean {
+  if (e.key !== binding.key) return false;
+  const ctrl = binding.ctrl ?? false;
+  const shift = binding.shift ?? false;
+  const alt = binding.alt ?? false;
+  const eCtrl = e.ctrlKey || e.metaKey;
+  return eCtrl === ctrl && e.shiftKey === shift && e.altKey === alt;
+}
+
+export const KEYBINDINGS = {
+  // ── 全局操作 ──
+  /** Ctrl+S — 保存当前 Markdown 文件 */
+  saveFile:          { key: "s", ctrl: true } as KeyBinding,
+  /** Ctrl+Z — Excel 单元格样式撤销 */
+  excelUndo:         { key: "z", ctrl: true } as KeyBinding,
+  /** Delete — 删除当前选中文件 */
+  deleteFile:        { key: "Delete" } as KeyBinding,
+  /** Delete — 删除文件树中选中的文件夹 */
+  deleteFolder:      { key: "Delete" } as KeyBinding,
+  /** F2 — 重命名选中的文件/文件夹 */
+  rename:            { key: "F2" } as KeyBinding,
+
+  // ── 面板 / 弹窗 ──
+  /** Escape — 关闭面板/弹窗/菜单 */
+  closePanel:        { key: "Escape" } as KeyBinding,
+
+  // ── 搜索 ──
+  /** ArrowDown — 搜索结果下一个 */
+  searchNext:        { key: "ArrowDown" } as KeyBinding,
+  /** ArrowUp — 搜索结果上一个 */
+  searchPrev:        { key: "ArrowUp" } as KeyBinding,
+  /** Enter — 打开搜索结果 */
+  searchOpen:        { key: "Enter" } as KeyBinding,
+
+  // ── 内联编辑（通用） ──
+  /** Enter — 确认（重命名/公式提交/颜色输入） */
+  confirm:           { key: "Enter" } as KeyBinding,
+  /** Escape — 取消（重命名/公式取消/搜索关闭） */
+  cancel:            { key: "Escape" } as KeyBinding,
+} as const;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Misc

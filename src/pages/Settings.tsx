@@ -15,7 +15,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react";
 import { t, getLang, setLang } from "../i18n";
 import type { Lang } from "../i18n";
-import { ZOOM_MIN, ZOOM_MAX, ZOOM_STEP, ZOOM_DEFAULT } from "../config";
+import { ZOOM_MIN, ZOOM_MAX, ZOOM_STEP, ZOOM_DEFAULT, KEYBINDINGS } from "../config";
 import { SettingsGearIcon, MonitorIcon, StorageCubeIcon, InfoCircleIcon } from "../components/icons";
 
 const STORAGE_KEY = "gull_settings";
@@ -179,7 +179,7 @@ const Settings = memo(function Settings({ onClose }: { onClose: () => void }) {
   }, [api]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === KEYBINDINGS.closePanel.key) onClose(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);

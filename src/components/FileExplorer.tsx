@@ -4,8 +4,8 @@ import { useNavigate } from "react-router-dom";
 import type { FolderFile } from "../types";
 import { t, getLang } from "../i18n";
 import Panel from "./Panel";
-import { EXPLORER_HEADER_HEIGHT, TREE_INDENT_BASE, TREE_INDENT_PER_DEPTH, TREE_ICON_GAP, TREE_CHEVRON_OFFSET, TREE_CHEVRON_WIDTH, TREE_GUIDE_OFFSET, TREE_GUIDE_HIGHLIGHT_WIDTH, TREE_GUIDE_HIGHLIGHT_COLOR } from "../config";
-import { ChevronIcon, MdFileIcon, ExcelFileIcon, NewFolderIcon, BackIcon, SearchIcon, SunIcon, MoonIcon } from "./icons";
+import { EXPLORER_HEADER_HEIGHT, TREE_INDENT_BASE, TREE_INDENT_PER_DEPTH, TREE_ICON_GAP, TREE_CHEVRON_OFFSET, TREE_CHEVRON_WIDTH, TREE_GUIDE_OFFSET, TREE_GUIDE_HIGHLIGHT_WIDTH, TREE_GUIDE_HIGHLIGHT_COLOR, KEYBINDINGS } from "../config";
+import { ChevronIcon, MdFileIcon, ExcelFileIcon, NewFolderIcon, RefreshIcon, BackIcon, SearchIcon, SunIcon, MoonIcon } from "./icons";
 
 /**
  * FileExplorer — 文件资源管理器（工作区视图的左侧面板）
@@ -64,6 +64,7 @@ interface FileExplorerProps {
   onMoveFile: (fileId: string, targetPath: string) => void;
   onMoveFolder: (oldPath: string, targetPath: string) => void;
   onSelectFolderPath?: (path: string | null) => void;
+  onRefresh?: () => void;
   searchActive: boolean;
   onSearchClose: () => void;
   newFileId?: string | null;
@@ -132,6 +133,7 @@ function FileExplorer({
   onMoveFile,
   onMoveFolder,
   onSelectFolderPath,
+  onRefresh,
   searchActive,
   onSearchClose,
   newFileId,
@@ -217,7 +219,7 @@ function FileExplorer({
     const file = files.find((f) => f.id === newFileId);
     if (file) {
       setRenamingId(file.id);
-      setRenameValue(file.name.split("/").pop() || file.name);
+      setRenameValue((file.name.split("/").pop() || file.name).replace(/\.\w+$/, ""));
     }
   }, [newFileId, files]);
 
@@ -237,22 +239,44 @@ function FileExplorer({
     return () => document.removeEventListener("click", handleClick);
   }, []);
 
-  // Delete key: 删除选中的文件或文件夹
+  // Delete / F2: 删除或重命名选中的文件/文件夹
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Delete") return;
-      const target = document.activeElement;
+      const target = document.activeElement as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
-      if (selectedFolderPath) {
+
+      if (e.key === "F2") {
+        // F2 重命名：文件夹优先（点击文件夹时 highlightFileId 仍保留旧值）
         e.preventDefault();
-        onDeleteFolder(selectedFolderPath);
-        setSelectedFolderPath(null);
+        if (selectedFolderPath) {
+          setRenamingFolder(selectedFolderPath);
+          setFolderRenameValue(selectedFolderPath);
+          return;
+        }
+        if (highlightFileId) {
+          const file = files.find((f) => f.id === highlightFileId);
+          if (file) {
+            setRenamingId(file.id);
+            setRenameValue((file.name.split("/").pop() || file.name).replace(/\.\w+$/, ""));
+            setContextMenu(null);
+            return;
+          }
+        }
         return;
+      }
+
+      if (e.key === "Delete") {
+        if (selectedFolderPath) {
+          e.preventDefault();
+          onDeleteFolder(selectedFolderPath);
+          setSelectedFolderPath(null);
+          return;
+        }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedFolderPath, onDeleteFolder]);
+  }, [selectedFolderPath, onDeleteFolder, highlightFileId, files]);
 
   // Close search on click outside
   useEffect(() => {
@@ -337,15 +361,16 @@ function FileExplorer({
   };
 
   const handleRenameStart = (file: FolderFile) => {
-    setRenamingId(file.id); setRenameValue(file.name.split("/").pop() || file.name); setContextMenu(null);
+    setRenamingId(file.id); setRenameValue((file.name.split("/").pop() || file.name).replace(/\.\w+$/, "")); setContextMenu(null);
   };
 
   const handleRenameSubmit = (fileId: string) => {
     const trimmed = renameValue.trim();
     if (trimmed) {
       const file = files.find(f => f.id === fileId);
+      const ext = file ? (file.name.match(/\.\w+$/) || [""])[0] : "";
       const dir = file ? file.name.split("/").slice(0, -1).join("/") : "";
-      onRenameFile(fileId, dir ? `${dir}/${trimmed}` : trimmed);
+      onRenameFile(fileId, dir ? `${dir}/${trimmed}${ext}` : `${trimmed}${ext}`);
     }
     setRenamingId(null);
     if (newFileId === fileId && onNewFileRenamed) onNewFileRenamed();
@@ -405,7 +430,7 @@ function FileExplorer({
             draggable={!isRenaming}
             onDragStart={() => { dragFolderPath.current = node.path; }}
             onDragEnd={() => { dragFolderPath.current = null; }}
-            onClick={() => { setSelectedFolderPath(node.path); onSelectFolderPath?.(node.path); }}
+            onClick={(e) => { e.stopPropagation(); setSelectedFolderPath(node.path); onSelectFolderPath?.(node.path); }}
             onContextMenu={(e) => handleContextMenu(e, undefined, node.path)}
             onDragOver={(e) => {
               e.preventDefault(); e.stopPropagation();
@@ -498,7 +523,7 @@ function FileExplorer({
         draggable={true}
         onDragStart={() => { dragFileId.current = file.id; }}
         onDragEnd={() => { dragFileId.current = null; }}
-        onClick={() => { setSelectedFolderPath(null); onSelectFolderPath?.(null); setHighlightFileId(file.id); onSelectFile(file.id); }}
+        onClick={(e) => { e.stopPropagation(); setSelectedFolderPath(null); onSelectFolderPath?.(null); setHighlightFileId(file.id); onSelectFile(file.id); }}
         onContextMenu={(e) => handleContextMenu(e, file.id)}
         className={`tree-row group px-2 py-1 mx-1 cursor-pointer transition-colors duration-100 flex items-center gap-1${highlightFileId === file.id && !selectedFolderPath ? " active" : ""}`}
         style={{
@@ -549,7 +574,7 @@ function FileExplorer({
               ? <MdFileIcon width={12} height={12} style={{ opacity: 0.5, flexShrink: 0 }} />
               : <ExcelFileIcon width={12} height={12} style={{ opacity: 0.5, flexShrink: 0 }} />
             }
-            <span className="text-[12px] truncate flex-1">{node.name.replace(/\.(md|xls)$/, "")}</span>
+            <span className="text-[12px] truncate flex-1">{node.name.replace(/\.(md|csv|xlsx)$/, "")}</span>
           </>
         )}
       </div>
@@ -573,6 +598,16 @@ function FileExplorer({
           >
             <NewFolderIcon width={14} height={14} />
           </button>
+          {onRefresh && (
+            <button
+              onClick={onRefresh}
+              className="fe-icon-btn flex items-center justify-center rounded flex-shrink-0"
+              style={{ width: 24, height: 24, color: "var(--text-tertiary)", background: "transparent", border: "none", cursor: "pointer" }}
+              title={t("refresh", lang)}
+            >
+              <RefreshIcon width={14} height={14} />
+            </button>
+          )}
         </div>
         <button onClick={() => navigate("/")}
           className="fe-btn text-[12px] px-2 py-1 rounded flex items-center gap-1"

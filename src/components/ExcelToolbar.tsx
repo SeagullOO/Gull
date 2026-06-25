@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { hexToHsv, hsvToHex } from "../utils/colorUtils";
 import { t, getLang } from "../i18n";
+import { KEYBINDINGS } from "../config";
 import { pushMetaUndo, type MetaCellSnapshot } from "../hooks/useMetaUndo";
 
 /**
@@ -232,10 +233,13 @@ function ExcelToolbar({ hot, onUndo, onRedo }: ExcelToolbarProps) {
               ? valueOrFn(hot.getCellMeta(r, c)[key])
               : valueOrFn;
           hot.setCellMeta(r, c, key, newVal);
+          (window as any).__recordFmt?.(r, c, key, newVal);
         }
       }
     }
     hot.render();
+    // 格式修改不触发 afterChange，手动触发自动保存
+    (window as any).__triggerExcelSave?.();
   };
 
   const handleBold = () =>
@@ -755,7 +759,7 @@ function ExcelToolbar({ hot, onUndo, onRedo }: ExcelToolbarProps) {
                 }
               }}
               onKeyDown={(e) => {
-                if (e.key === "Enter") {
+                if (e.key === KEYBINDINGS.confirm.key) {
                   const v = customHex;
                   if (/^#[0-9a-fA-F]{6}$/.test(v)) {
                     applyCustomColor(v.toUpperCase());

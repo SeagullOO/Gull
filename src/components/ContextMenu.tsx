@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { t, getLang } from "../i18n";
+import { KEYBINDINGS } from "../config";
 import type { Lang } from "../i18n";
 
 /**
@@ -504,7 +505,7 @@ export default function ContextMenu({
   useEffect(() => {
     if (!visible) return;
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === KEYBINDINGS.closePanel.key) onClose();
     };
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);

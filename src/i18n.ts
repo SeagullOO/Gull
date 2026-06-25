@@ -85,6 +85,7 @@ const DICT: Record<string, { zh: string; en: string }> = {
 
   // ── FileExplorer / FileTree ──
   newFolder: { zh: "新建文件夹", en: "New Folder" },
+  refresh: { zh: "刷新", en: "Refresh" },
   backToHome: { zh: "返回主页", en: "Back to Home" },
   searchFiles: { zh: "搜索文件...", en: "Search files..." },
   noFiles: { zh: "暂无文件", en: "No files" },
@@ -174,7 +175,7 @@ const DICT: Record<string, { zh: string; en: string }> = {
   loadFailed: { zh: "加载失败", en: "Failed to load" },
   returnToFolderList: { zh: "← 返回文件夹列表", en: "← Back to folder list" },
   importedWorkspace: { zh: "导入的工作区", en: "Imported Workspace" },
-  noImportableFiles: { zh: "所选文件夹中没有可导入的文件（.md / .json）", en: "No importable files found in the selected folder (.md / .json)" },
+  noImportableFiles: { zh: "所选文件夹中没有可导入的文件（.md / .xlsx / .csv）", en: "No importable files found in the selected folder (.md / .xlsx / .csv)" },
 
   // ── Template Manager ──
   templateManagement: { zh: "模版管理", en: "Template Management" },

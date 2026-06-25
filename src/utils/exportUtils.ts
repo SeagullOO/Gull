@@ -8,8 +8,7 @@
  * 2. Markdown 文件：将 TipTap JSON 转为标准 Markdown 格式，
  *    处理 fileLink（文件引用）和 spreadsheetBlock（嵌入表格）等特殊节点，
  *    嵌入的表格导出为独立的 CSV 文件
- * 3. Excel 文件：导出为带样式的 HTML（.xls，保留颜色/粗体/斜体）+
- *    纯文本 CSV（兼容性）
+ * 3. Excel 文件：导出为真正的 .xlsx 文件（保留颜色/粗体/斜体/字号）
  * 4. 使用 storageExportFiles 统一导出（Electron: 原生文件对话框; 浏览器: Blob 下载）
  *
  * 导出：
@@ -18,6 +17,7 @@
 
 import type { Folder, FolderFile } from "../types";
 import { storageExportFiles } from "../storage";
+import { dataToXlsxBase64 } from "./xlsxUtils";
 
 /** TipTap/ProseMirror 节点结构（导出转换时使用） */
 interface TipTapNode {
@@ -48,34 +48,8 @@ function toCsv(data: string[][]): string {
     .join("\n");
 }
 
-/** 将 Excel 数据 + 样式元数据转为带内联样式的 HTML 表格（Excel 可打开） */
-function excelToStyledHtml(data: string[][], cellMeta?: any[][]): string {
-  const rows: string[] = [];
-  rows.push('<html><head><meta charset="utf-8"><style>td{padding:2px 6px;border:1px solid #ccc;}</style></head><body><table>');
-  for (let r = 0; r < data.length; r++) {
-    rows.push('<tr>');
-    for (let c = 0; c < (data[r]?.length || 0); c++) {
-      const meta = cellMeta?.[r]?.[c];
-      const styles: string[] = [];
-      if (meta?._bold) styles.push('font-weight:bold');
-      if (meta?._italic) styles.push('font-style:italic');
-      if (meta?._color) styles.push(`color:${meta._color}`);
-      if (meta?._bgColor) styles.push(`background-color:${meta._bgColor}`);
-      if (meta?._fontSize) styles.push(`font-size:${meta._fontSize}px`);
-      const styleAttr = styles.length ? ` style="${styles.join(';')}"` : '';
-      rows.push(`<td${styleAttr}>${(data[r]?.[c] || "").replace(/&/g,'&amp;').replace(/</g,'&lt;')}</td>`);
-    }
-    rows.push('</tr>');
-  }
-  rows.push('</table></body></html>');
-  return rows.join('\n');
-}
-
 /**
  * 将 TipTap mark 标记包裹为 Markdown 语法
- *
- * 支持的 mark 类型：bold (**), italic (*), code (`), link, fileLink
- * fileLink 会尝试在工作区文件列表中查找目标文件并生成相对路径引用
  */
 function wrapMarks(
   text: string,
@@ -98,8 +72,7 @@ function wrapMarks(
       if (files) {
         const target = files.find((f) => f.id === fileId);
         if (target) {
-          const relPath =
-            target.type === "md" ? `./${target.name}` : `./${target.name}.csv`;
+          const relPath = target.type === "md" ? `./${target.name}` : `./${target.name}`;
           result = `[${target.name}](${relPath})`;
         } else {
           result = `[${fileName}](.)`;
@@ -231,7 +204,7 @@ function processBlock(node: TipTapNode, files?: FolderFile[]): string {
         data,
         colHeaders: ((node.attrs as any)?.colHeaders || []) as string[],
       });
-      return `[📊 嵌入表格 ${index} — 见导出文件夹中的 表格_${index}.csv]`;
+      return `[📊 嵌入表格 ${index} — 见导出文件夹中的 表格_${index}.xlsx]`;
     }
 
     case "excelFileLink": {
@@ -256,18 +229,17 @@ function tipTapJsonToMarkdown(doc: TipTapNode, files?: FolderFile[]): string {
  * 导出整个工作区文件夹
  *
  * 为每个文件生成可发布的格式：
- * - .md 文件保持原样（包含嵌入表格的 CSV 引用说明）
- * - Excel 文件生成 .xls（HTML 格式，保留样式）+ .csv（纯数据）
+ * - .md 文件保持原样（包含嵌入表格的引用说明）
+ * - Excel 文件生成真实的 .xlsx 文件（保留样式）
  *
  * @param folder 要导出的文件夹对象
  * @returns 导出结果描述字符串（如 "已导出 5 个文件"）
  */
 export async function exportFolder(folder: Folder): Promise<string> {
-  // 清理文件名中的非法字符
   const safeName =
     folder.name.replace(/[<>:"/\\|?*]/g, "_").trim() || "文件夹";
 
-  const fileContents: Array<{ name: string; content: string }> = [];
+  const fileContents: Array<{ name: string; content: string; encoding?: "base64" }> = [];
 
   for (const file of folder.files) {
     if (file.type === "md") {
@@ -283,11 +255,13 @@ export async function exportFolder(folder: Folder): Promise<string> {
       }
     } else if (file.type === "excel") {
       const excelData = file.content?.data as string[][] | undefined;
+      const colHeaders = file.content?.colHeaders as string[] | undefined;
       const cellMeta = file.content?.cellMeta as any[][] | undefined;
-      // 导出为带样式的 HTML（.xls 扩展名，Excel 可打开并保留颜色/粗体/斜体）
-      const htmlContent = excelToStyledHtml(excelData || [[""]], cellMeta);
-      const htmlName = file.name.replace(/\.json$/, "") + ".xls";
-      fileContents.push({ name: htmlName, content: htmlContent });
+      // 导出为真正的 .xlsx 文件（保留颜色/粗体/斜体/字号）
+      const xlsxBase64 = await dataToXlsxBase64(excelData || [[]], colHeaders || [], cellMeta);
+      const xlsxName = file.name.replace(/\.(csv|xlsx)$/i, ".xlsx").replace(/\.json$/i, ".xlsx");
+      const exportName = xlsxName.endsWith(".xlsx") ? xlsxName : xlsxName + ".xlsx";
+      fileContents.push({ name: exportName, content: xlsxBase64, encoding: "base64" });
     }
   }
 
@@ -295,7 +269,7 @@ export async function exportFolder(folder: Folder): Promise<string> {
   const exportFiles = fileContents.map((f) => ({
     relativePath: safeName + "/" + f.name,
     content: f.content,
+    encoding: f.encoding as "base64" | undefined,
   }));
   return storageExportFiles(exportFiles);
 }
-

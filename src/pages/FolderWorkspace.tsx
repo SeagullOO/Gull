@@ -54,7 +54,9 @@ import StatusBadge from "../components/StatusBadge";
 import { useFileTabs } from "../hooks/useFileTabs";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { exportFolder } from "../utils/exportUtils";
-import { ZOOM_MIN, ZOOM_MAX, ZOOM_STEP, ZOOM_REFERENCE, PANEL_WIDTH, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH, SPLITTER_WIDTH, SPLITTER_HIT } from "../config";
+import { ZOOM_MIN, ZOOM_MAX, ZOOM_STEP, ZOOM_REFERENCE, CONTENT_ZOOM_MIN, CONTENT_ZOOM_MAX, CONTENT_ZOOM_STEP, CONTENT_ZOOM_DEFAULT, PANEL_WIDTH, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH, SPLITTER_WIDTH, SPLITTER_HIT } from "../config";
+import { dataToCsv, csvToData, storageReadWorkspaceFileBinary, storageWriteWorkspaceFileBinary } from "../storage";
+import { dataToXlsxBase64, xlsxBase64ToData, createEmptyXlsxBase64 } from "../utils/xlsxUtils";
 
 /** 新建 Markdown 文件的默认内容（TipTap 文档结构） */
 const defaultMdContent = { type: "doc", content: [{ type: "paragraph" }] };
@@ -126,19 +128,101 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
   // Electron: 当选中的文件内容为空时，从磁盘加载内容
   useEffect(() => {
     if (!isDisk || !folder || !currentFile || !folderId) return;
-    const isEmpty = currentFile.type === "md"
-      ? !currentFile.content || (typeof currentFile.content === "string" && currentFile.content === "")
-      : !currentFile.content?.data || !currentFile.content.data.length;
+    const rawContent = currentFile.content;
+    let isEmpty = false;
+    if (currentFile.type === "md") {
+      isEmpty = !rawContent || (typeof rawContent === "string" && rawContent === "");
+    } else {
+      // Excel: 空字符串、空对象或占位数据（storageListWorkspaceFiles 创建的 {data:[[]]}）视为未加载
+      isEmpty = !rawContent || (typeof rawContent === "string") || (typeof rawContent === "object" && (
+        !rawContent.data || !rawContent.data.length ||
+        // 占位数据：只有 1 行且该行只有 ≤1 个空单元格
+        (rawContent.data.length === 1 && (!rawContent.data[0] || rawContent.data[0].length <= 1) &&
+         rawContent.data.every((row: string[]) => !row || row.every((cell: string) => cell === "" || cell == null)))
+      ));
+    }
     if (!isEmpty) return;
-    storageReadWorkspaceFile(folder.name, currentFile.name).then((raw) => {
+
+    (async () => {
+      const fileName = currentFile.name;
+      const isXlsx = fileName.toLowerCase().endsWith(".xlsx");
+      const isCsv = fileName.toLowerCase().endsWith(".csv");
+
+      if (currentFile.type === "excel" && isXlsx) {
+        // 新格式：读取 .xlsx 二进制文件
+        const xlsxBase64 = await storageReadWorkspaceFileBinary(folder.name, fileName);
+        if (!xlsxBase64) return;
+        try {
+          const parsed = await xlsxBase64ToData(xlsxBase64);
+          setFolder((prev) => prev ? { ...prev, files: prev.files?.map((f) =>
+            f.id === currentFile.id ? { ...f, content: parsed } : f
+          )} : null);
+          return;
+        } catch { /* fall through to error handling */ }
+      }
+
+      if (currentFile.type === "excel" && isCsv) {
+        // Legacy 格式：读取 .csv + .meta，自动迁移到 .xlsx
+        const csvRaw = await storageReadWorkspaceFile(folder.name, fileName);
+        if (!csvRaw) return;
+        const data = csvToData(csvRaw);
+        const colHeaders = data[0] ? Array.from({ length: data[0].length }, (_, i) => String.fromCharCode(65 + i)) : [];
+        let cellMeta: any[][] | undefined = undefined;
+        try {
+          const metaRaw = await storageReadWorkspaceFile(folder.name, fileName + ".meta");
+          if (metaRaw) { const m = JSON.parse(metaRaw); cellMeta = m.cellMeta; }
+        } catch {}
+        const content = { data, colHeaders, cellMeta };
+
+        // 自动迁移：写为 .xlsx 并清理旧文件
+        try {
+          const xlsxBase64 = await dataToXlsxBase64(data, colHeaders, cellMeta);
+          const newName = fileName.replace(/\.csv$/i, ".xlsx");
+          await storageWriteWorkspaceFileBinary(folder.name, newName, xlsxBase64);
+          await storageDeleteWorkspaceFile(folder.name, fileName);
+          await storageDeleteWorkspaceFile(folder.name, fileName + ".meta");
+          setFolder((prev) => prev ? { ...prev, files: prev.files?.map((f) =>
+            f.id === currentFile.id ? { ...f, name: newName, content } : f
+          )} : null);
+          return;
+        } catch {
+          // 迁移失败，仍然设置内容让用户能编辑
+          setFolder((prev) => prev ? { ...prev, files: prev.files?.map((f) =>
+            f.id === currentFile.id ? { ...f, content } : f
+          )} : null);
+          return;
+        }
+      }
+
+      // Markdown 或其他：读取文本内容
+      const raw = await storageReadWorkspaceFile(folder.name, fileName);
       if (!raw) return;
       try {
-        const parsed = JSON.parse(raw);
-        setFolder((prev) => prev ? { ...prev, files: prev.files?.map((f) => f.id === currentFile.id ? { ...f, content: parsed } : f) } : null);
+        if (currentFile.type === "excel") {
+          // 未知扩展名的 Excel 文件，尝试作为 CSV 读取
+          const data = csvToData(raw);
+          const colHeaders = data[0] ? Array.from({ length: data[0].length }, (_, i) => String.fromCharCode(65 + i)) : [];
+          setFolder((prev) => prev ? { ...prev, files: prev.files?.map((f) =>
+            f.id === currentFile.id ? { ...f, content: { data, colHeaders } } : f
+          )} : null);
+        } else {
+          try {
+            const parsed = JSON.parse(raw);
+            setFolder((prev) => prev ? { ...prev, files: prev.files?.map((f) =>
+              f.id === currentFile.id ? { ...f, content: parsed } : f
+            )} : null);
+          } catch {
+            setFolder((prev) => prev ? { ...prev, files: prev.files?.map((f) =>
+              f.id === currentFile.id ? { ...f, content: raw } : f
+            )} : null);
+          }
+        }
       } catch {
-        setFolder((prev) => prev ? { ...prev, files: prev.files?.map((f) => f.id === currentFile.id ? { ...f, content: raw } : f) } : null);
+        setFolder((prev) => prev ? { ...prev, files: prev.files?.map((f) =>
+          f.id === currentFile.id ? { ...f, content: raw } : f
+        )} : null);
       }
-    });
+    })();
   }, [currentFileId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── 缩放滚轮监听（原生事件，按容器独立处理，非全局级）──────────
@@ -181,12 +265,12 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
       e.preventDefault();
       e.stopPropagation();
       setContentZoom?.((prev) => {
-        const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, prev + (e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP)));
+        const next = Math.min(CONTENT_ZOOM_MAX, Math.max(CONTENT_ZOOM_MIN, prev + (e.deltaY > 0 ? -CONTENT_ZOOM_STEP : CONTENT_ZOOM_STEP)));
         saveSetting("contentZoom", next);
         (window as any).__contentZoom = next;
         // 补偿父级 UI 缩放：编辑器实际缩放 = (contentZoom / 100) / (uiZoom / 110)
         const uiZoomCss = zoomRef.current !== ZOOM_REFERENCE ? zoomRef.current / ZOOM_REFERENCE : 1;
-        (wsEl as any).style.zoom = next !== 100 ? String((next / 100) / uiZoomCss) : "";
+        (wsEl as any).style.zoom = next !== CONTENT_ZOOM_DEFAULT ? String((next / CONTENT_ZOOM_DEFAULT) / uiZoomCss) : "";
         return next;
       });
     };
@@ -204,7 +288,17 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
   // useMarkdownEditor: 管理 raw markdown 源文本、自动保存、强制保存
   // useExcelEditor:    管理 Handsontable 实例生命周期、编辑栏同步、撤销/重做
   // 两者通过 currentFile 判断是否激活（null 时不初始化编辑器）
-  const { source, setSource, handleForceSave, editorRef } = useMarkdownEditor(currentFile, folderId, saveStatus, setSaveStatus);
+  const { source, setSource, handleForceSave, editorRef } = useMarkdownEditor(currentFile, folderId, folder?.name || null, saveStatus, setSaveStatus);
+
+  // 切换标签页前保存当前文件
+  const prevFileRef = useRef(currentFileId);
+  useEffect(() => {
+    if (prevFileRef.current && prevFileRef.current !== currentFileId) {
+      if (currentFile?.type === "md") handleForceSave();
+      prevFileRef.current = currentFileId;
+    }
+    if (!prevFileRef.current) prevFileRef.current = currentFileId;
+  }, [currentFileId]);
 
   // 状态栏：直接操作 DOM，避免 React 重渲染
   const updateStatusBar = (html: string) => {
@@ -217,7 +311,7 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
     updateStatusBar(`<span>${type}</span>`);
   }, [currentFile]);
   const { hotRef, hotInstance, hotKey, cellRef, formulaValue, setFormulaValue, isFormulaBarFocused, handleUndo, handleRedo } =
-    useExcelEditor(currentFile, folderId, reloadFolder);
+    useExcelEditor(currentFile, folderId, folder?.name || null, reloadFolder);
 
   // ─── 键盘快捷键 ──────────────────────────────────────────────────────
   // Ctrl+S / Cmd+S: 仅在 Markdown 文件激活时触发强制保存
@@ -226,7 +320,10 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
   const isMdFile = !!currentFile && currentFile.type === "md";
   useKeyboardShortcuts(isMdFile ? handleForceSave : null, isMdFile && !!folderId);
   // ─── Tab 点击：切换当前文件 ────────────────────────────────────────────
-  const handleTabClick = (fileId: string) => { setCurrentFileId(fileId); };
+  const handleTabClick = (fileId: string) => {
+    if (currentFile?.type === "md") handleForceSave();
+    setCurrentFileId(fileId);
+  };
 
   // ─── Home mode: load folders ────────────────────────────────────────────
   const loadFolders = useCallback(async () => { setFolders(await storageLoadFolders()); setHomeLoaded(true); }, []);
@@ -270,13 +367,20 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
   // ─── 工作区模式：辅助函数 ──────────────────────────────────────────
   async function reloadFolder() {
     if (!folderId) return;
+    // 记住当前打开的文件名，刷新后按名称重新匹配（因为 storageListWorkspaceFiles 会生成新 ID）
+    const currentFileName = folder?.files.find((f) => f.id === currentFileId)?.name;
     const f = await storageGetFolder(folderId);
     if (!f) return;
     if (isDisk) {
       const { files, folders } = await storageListWorkspaceFiles(f.name);
       f.files = files; f.folders = folders;
     }
-    if (f) setFolder(f);
+    setFolder(f);
+    // 刷新后重新匹配当前文件
+    if (currentFileName) {
+      const matched = f.files?.find((ff) => ff.name === currentFileName);
+      if (matched) setCurrentFileId(matched.id);
+    }
   }
 
   // ─── 文件夹名称自动保存（2.5 秒防抖）────────────────────────────────
@@ -305,8 +409,23 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
     // Electron: 把模版中的文件写入磁盘
     if (isDisk) {
       for (const file of f.files) {
-        const content = file.type === "md" ? (typeof file.content === "string" ? file.content : JSON.stringify(file.content)) : JSON.stringify(file.content);
-        await storageWriteWorkspaceFile(f.name, file.name, content);
+        if (file.type === "md") {
+          const content = typeof file.content === "string" ? file.content : "";
+          await storageWriteWorkspaceFile(f.name, file.name, content);
+        } else {
+          // Excel: 序列化为 .xlsx
+          const content = file.content;
+          if (content?.data) {
+            const xlsxBase64 = await dataToXlsxBase64(content.data, content.colHeaders || [], content.cellMeta);
+            const xlsxName = file.name.replace(/\.(csv)$/i, ".xlsx");
+            if (xlsxName !== file.name) file.name = xlsxName;
+            await storageWriteWorkspaceFileBinary(f.name, xlsxName, xlsxBase64);
+          } else {
+            // 空 Excel 模版文件
+            const emptyXlsx = await createEmptyXlsxBase64();
+            await storageWriteWorkspaceFileBinary(f.name, file.name, emptyXlsx);
+          }
+        }
       }
     }
     setFolders((prev) => [f, ...prev]);
@@ -328,15 +447,26 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
       if (ext === "md") {
         const content = await api.readFileAt(folderPath + "/" + entry.name);
         files.push({ id: generateId(), name: entry.name, type: "md", content: content || "", createdAt: Date.now(), updatedAt: Date.now() });
-      } else if (ext === "json" || ext === "xls") {
+      } else if (ext === "xlsx") {
+        // 读取 .xlsx 二进制文件（通过 base64）
+        const xlsxBase64 = await api.readFileAtBinary(folderPath + "/" + entry.name);
+        if (!xlsxBase64) continue;
+        try {
+          const parsed = await xlsxBase64ToData(xlsxBase64);
+          files.push({ id: generateId(), name: entry.name, type: "excel", content: parsed, createdAt: Date.now(), updatedAt: Date.now() });
+        } catch { continue; }
+      } else if (ext === "csv") {
         const raw = await api.readFileAt(folderPath + "/" + entry.name);
         if (!raw) continue;
+        const data = csvToData(raw);
+        // Try loading metadata
+        let cellMeta = undefined;
         try {
-          const parsed = JSON.parse(raw);
-          if (parsed && typeof parsed === "object") {
-            files.push({ id: generateId(), name: entry.name, type: "excel", content: parsed, createdAt: Date.now(), updatedAt: Date.now() });
-          }
-        } catch { /* skip invalid JSON */ }
+          const metaRaw = await api.readFileAt(folderPath + "/" + entry.name + ".meta");
+          if (metaRaw) cellMeta = JSON.parse(metaRaw).cellMeta;
+        } catch {}
+        const colHeaders = data[0] ? Array.from({ length: data[0].length }, (_, i) => String.fromCharCode(65 + i)) : [];
+        files.push({ id: generateId(), name: entry.name, type: "excel", content: { data, colHeaders, cellMeta }, createdAt: Date.now(), updatedAt: Date.now() });
       }
     }
     if (files.length === 0) { alert(t("noImportableFiles", lang)); return; }
@@ -439,9 +569,15 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
   // Delete 键删除选中文件
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Delete" || !currentFileId || !folder) return;
-      const target = document.activeElement;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      if (!currentFileId || !folder) return;
+      const target = document.activeElement as HTMLElement | null;
+
+      if (e.key !== "Delete") return;
+      if (target) {
+        if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+        if (target.closest(".hot-container") || target.closest(".handsontable")) return;
+        if (target.classList.contains("handsontableInput")) return;
+      }
       e.preventDefault();
       handleDeleteFile(currentFileId);
     };
@@ -457,7 +593,7 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
   const handleAddFile = async (type: "md" | "excel") => {
     if (!folderId || !folder) return;
     const base = type === "md" ? t("untitledDocument", lang) : t("untitledSheet", lang);
-    const ext = type === "md" ? ".md" : ".xls";
+    const ext = type === "md" ? ".md" : ".xlsx";
     // 若选中了文件夹，新文件创建在选中的文件夹内
     const prefix = targetFolderPath ? `${targetFolderPath}/` : "";
     let basename = prefix + base + ext;
@@ -469,8 +605,12 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
     }
     const fileId = generateId();
     if (isDisk) {
-      const content = type === "md" ? JSON.stringify(defaultMdContent) : JSON.stringify(defaultExcelContent);
-      await storageWriteWorkspaceFile(folder.name, basename, content);
+      if (type === "excel") {
+        const emptyXlsx = await createEmptyXlsxBase64();
+        await storageWriteWorkspaceFileBinary(folder.name, basename, emptyXlsx);
+      } else {
+        await storageWriteWorkspaceFile(folder.name, basename, "");
+      }
       const file: FolderFile = { id: fileId, name: basename, type, content: type === "md" ? defaultMdContent : defaultExcelContent, createdAt: Date.now(), updatedAt: Date.now() };
       const files = [...(folder?.files || []), file];
       setFolder((prev) => prev ? { ...prev, files, updatedAt: Date.now() } : null);
@@ -696,6 +836,7 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
             currentFileId={currentFileId}
             onSelectFile={handleSelectFile} onRenameFile={handleRenameFile} onDeleteFile={handleDeleteFile}
             onAddFile={handleAddFile} onCreateFolder={handleCreateFolder} onRenameFolder={handleRenameFolderPath} onDeleteFolder={handleDeleteFolderPath} onMoveFile={handleMoveFile} onMoveFolder={handleMoveFolder} onDeselectAll={() => setCurrentFileId(null)} onSelectFolderPath={setTargetFolderPath}
+            onRefresh={reloadFolder}
             searchActive={searchActive}
             onSearchClose={() => setSearchActive(false)} newFileId={newFileId}
             onNewFileRenamed={() => setNewFileId(null)} />
@@ -731,13 +872,14 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
             <header className="px-4 py-2 flex items-center gap-3 shrink-0"
               style={{ background: "var(--bg-panel)", borderBottom: "1px solid var(--border-subtle)" }}>
               <input
-                value={currentFile ? (currentFile.name.split("/").pop() || "").replace(/\.(md|json)$/, "") : folderName}
+                id="workspace-title-input"
+                value={currentFile ? (currentFile.name.split("/").pop() || "").replace(/\.(md|csv|xlsx)$/, "") : folderName}
                 onCompositionStart={() => { isComposing.current = true; }}
                 onCompositionEnd={(e) => {
                   isComposing.current = false;
                   const target = e.target as HTMLInputElement;
                   if (currentFile) {
-                    const ext = currentFile.name.match(/\.(md|json)$/)?.[0] || "";
+                    const ext = currentFile.name.match(/\.(md|csv|xlsx)$/)?.[0] || "";
                     const dir = currentFile.name.split("/").slice(0, -1).join("/");
                     const newName = dir ? `${dir}/${target.value}${ext}` : `${target.value}${ext}`;
                     handleRenameFile(currentFile.id, newName);
@@ -748,7 +890,7 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
                 onChange={(e) => {
                   if (isComposing.current) return;
                   if (currentFile) {
-                    const ext = currentFile.name.match(/\.(md|json)$/)?.[0] || "";
+                    const ext = currentFile.name.match(/\.(md|csv|xlsx)$/)?.[0] || "";
                     const dir = currentFile.name.split("/").slice(0, -1).join("/");
                     const newName = dir ? `${dir}/${e.target.value}${ext}` : `${e.target.value}${ext}`;
                     handleRenameFile(currentFile.id, newName);
@@ -770,7 +912,7 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
                       const defaultBase = isMd
                         ? t("untitledDocument", lang).replace(/\.md$/, "")
                         : t("untitledSheet", lang);
-                      const ext = currentFile.name.match(/\.(md|json)$/)?.[0] || "";
+                      const ext = currentFile.name.match(/\.(md|csv|xlsx)$/)?.[0] || "";
                       const dir = currentFile.name.split("/").slice(0, -1).join("/");
                       const fallbackName = dir
                         ? `${dir}/${defaultBase}${ext}`
@@ -800,7 +942,7 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
                       className={`tab ${currentFileId === file.id ? "active" : ""}`}
                       onClick={() => handleTabClick(file.id)}>
                       <span style={{ fontSize: 11, opacity: 0.4 }}>{file.type === "md" ? "M" : "E"}</span>
-                      <span>{(file.name.split("/").pop() || "").replace(/\.(md|xls)$/, "")}</span>
+                      <span>{(file.name.split("/").pop() || "").replace(/\.(md|csv|xlsx)$/, "")}</span>
                       {currentFileId === file.id && <span className="tab-dirty" />}
                       <button className="tab-close" onClick={(e) => handleCloseTab(file.id, e)}>×</button>
                     </div>

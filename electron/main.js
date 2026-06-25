@@ -164,9 +164,26 @@ ipcMain.handle("fs:readFile", async (_e, filename) => {
   try { return fs.existsSync(fp) ? fs.readFileSync(fp, "utf-8") : null; }
   catch { return null; }
 });
+ipcMain.handle("fs:readFileBinary", async (_e, filename) => {
+  const fp = path.join(getDataPath(), filename);
+  try {
+    if (!fs.existsSync(fp)) return null;
+    return fs.readFileSync(fp).toString("base64");
+  } catch { return null; }
+});
 ipcMain.handle("fs:writeFile", async (_e, filename, data) => {
   try { fs.writeFileSync(path.join(getDataPath(), filename), data, "utf-8"); return true; }
   catch { return false; }
+});
+ipcMain.handle("fs:writeFileBinary", async (_e, filename, base64Data) => {
+  try {
+    const buf = Buffer.from(base64Data, "base64");
+    const fp = path.join(getDataPath(), filename);
+    const d = path.dirname(fp);
+    if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(fp, buf);
+    return true;
+  } catch { return false; }
 });
 ipcMain.handle("fs:deleteFile", async (_e, filename) => {
   try { const fp = path.join(getDataPath(), filename); if (fs.existsSync(fp)) fs.unlinkSync(fp); return true; }
@@ -244,7 +261,11 @@ ipcMain.handle("export:writeFiles", async (_e, basePath, files) => {
       const fp = path.join(basePath, f.relativePath);
       const d = path.dirname(fp);
       if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
-      fs.writeFileSync(fp, f.content, "utf-8");
+      if (f.encoding === "base64") {
+        fs.writeFileSync(fp, Buffer.from(f.content, "base64"));
+      } else {
+        fs.writeFileSync(fp, f.content, "utf-8");
+      }
     }
     return { success: true, count: files.length };
   } catch (e) { return { success: false, error: e.message }; }
@@ -268,16 +289,24 @@ ipcMain.handle("fs:readDir", async (_e, dirPath) => {
 });
 ipcMain.handle("fs:readFileAt", async (_e, filePath) => {
   try {
-    // 路径遍历保护：只允许读取用户通过对话框选择的目录下的文件
     if (typeof filePath !== "string" || !filePath) return null;
     const resolved = path.resolve(filePath);
-    // 拒绝符号链接和父目录穿越
     if (resolved.includes("..")) return null;
     const stat = fs.statSync(resolved);
     if (!stat.isFile()) return null;
-    // 限制文件大小防止内存耗尽（最大 10MB）
     if (stat.size > 10 * 1024 * 1024) return null;
     return fs.readFileSync(resolved, "utf-8");
+  } catch { return null; }
+});
+ipcMain.handle("fs:readFileAtBinary", async (_e, filePath) => {
+  try {
+    if (typeof filePath !== "string" || !filePath) return null;
+    const resolved = path.resolve(filePath);
+    if (resolved.includes("..")) return null;
+    const stat = fs.statSync(resolved);
+    if (!stat.isFile()) return null;
+    if (stat.size > 10 * 1024 * 1024) return null;
+    return fs.readFileSync(resolved).toString("base64");
   } catch { return null; }
 });
 
