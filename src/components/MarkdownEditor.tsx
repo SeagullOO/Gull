@@ -241,6 +241,7 @@ function MarkdownEditor({ source, onSourceChange, editorRef, isPreviewMode, onTo
               minimap: { enabled: false },
               lineNumbers: "on",
               renderLineHighlight: "line",
+              occurrencesHighlight: "off",
               scrollBeyondLastLine: false,
               wordWrap: "on",
               automaticLayout: true,
@@ -302,13 +303,15 @@ function MarkdownEditor({ source, onSourceChange, editorRef, isPreviewMode, onTo
             editorRef.current?.getAction("editor.action.clipboardCutAction")?.run();
             setCtxMenu(null);
           }}>
-            剪切
+            <span className="ctx-item-label">剪切</span>
+            <span className="ctx-item-shortcut">Ctrl+X</span>
           </button>
           <button className="ctx-item" onClick={() => {
             editorRef.current?.getAction("editor.action.clipboardCopyAction")?.run();
             setCtxMenu(null);
           }}>
-            复制
+            <span className="ctx-item-label">复制</span>
+            <span className="ctx-item-shortcut">Ctrl+C</span>
           </button>
           <button className="ctx-item" onClick={() => {
             editorRef.current?.focus();
@@ -319,26 +322,30 @@ function MarkdownEditor({ source, onSourceChange, editorRef, isPreviewMode, onTo
             }).catch(() => {});
             setCtxMenu(null);
           }}>
-            粘贴
+            <span className="ctx-item-label">粘贴</span>
+            <span className="ctx-item-shortcut">Ctrl+V</span>
           </button>
           <button className="ctx-item" onClick={() => {
             editorRef.current?.getAction("editor.action.selectAll")?.run();
             setCtxMenu(null);
           }}>
-            全选
+            <span className="ctx-item-label">全选</span>
+            <span className="ctx-item-shortcut">Ctrl+A</span>
           </button>
           <div className="ctx-separator" />
           <button className="ctx-item" onClick={() => {
             editorRef.current?.getAction("editor.action.undo")?.run();
             setCtxMenu(null);
           }}>
-            撤销
+            <span className="ctx-item-label">撤销</span>
+            <span className="ctx-item-shortcut">Ctrl+Z</span>
           </button>
           <button className="ctx-item" onClick={() => {
             editorRef.current?.getAction("editor.action.redo")?.run();
             setCtxMenu(null);
           }}>
-            重做
+            <span className="ctx-item-label">重做</span>
+            <span className="ctx-item-shortcut">Ctrl+Shift+Z</span>
           </button>
         </div>,
         document.body
