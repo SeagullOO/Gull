@@ -200,7 +200,9 @@ const Settings = memo(function Settings({ onClose }: { onClose: () => void }) {
     const api = (window as any).electronAPI;
     if (api?.getSystemFonts) {
       api.getSystemFonts().then((fonts: string[]) => {
-        setFontList(fonts.filter((f: string) => f !== MD_FONT_DEFAULT));
+        // 确保默认字体出现在列表最前面（即使系统未安装）
+        const filtered = fonts.filter((f: string) => f !== MD_FONT_DEFAULT);
+        setFontList(filtered);
         setFontListLoading(false);
       }).catch(() => {
         setFontListLoading(false);

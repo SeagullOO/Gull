@@ -6,6 +6,12 @@
     <title>Gull</title>
     <link rel="stylesheet" href="/vendor/handsontable.full.min.css" />
     <style>
+      /* Maple Mono CN — 内置等宽字体，Markdown 编辑器默认 */
+      @font-face { font-family: 'Maple Mono CN'; src: url('/fonts/MapleMono-CN-Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; font-display: swap; }
+      @font-face { font-family: 'Maple Mono CN'; src: url('/fonts/MapleMono-CN-Bold.ttf') format('truetype'); font-weight: 700; font-style: normal; font-display: swap; }
+      @font-face { font-family: 'Maple Mono CN'; src: url('/fonts/MapleMono-CN-Italic.ttf') format('truetype'); font-weight: 400; font-style: italic; font-display: swap; }
+      @font-face { font-family: 'Maple Mono CN'; src: url('/fonts/MapleMono-CN-BoldItalic.ttf') format('truetype'); font-weight: 700; font-style: italic; font-display: swap; }
+
       /* Override Handsontable CSS for dark mode — uses CSS variables for theme compatibility */
       .handsontable td,.handsontable th,.htCore td,.htCore th{background:var(--bg-root,#1e1e1e);color:var(--text-primary,#dadada);border-color:var(--border-subtle,rgba(255,255,255,0.06))!important}
       .handsontable{background:var(--bg-root,#1e1e1e)!important}

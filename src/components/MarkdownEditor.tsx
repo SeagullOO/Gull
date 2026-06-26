@@ -300,33 +300,45 @@ function MarkdownEditor({ source, onSourceChange, editorRef, isPreviewMode, onTo
           onClick={(e) => e.stopPropagation()}
         >
           <button className="ctx-item" onClick={() => {
-            editorRef.current?.getAction("editor.action.clipboardCutAction")?.run();
+            const ed = editorRef.current;
+            if (!ed) return;
+            ed.focus();
+            ed.trigger("keyboard", "editor.action.clipboardCutAction");
             setCtxMenu(null);
           }}>
             <span className="ctx-item-label">剪切</span>
             <span className="ctx-item-shortcut">Ctrl+X</span>
           </button>
           <button className="ctx-item" onClick={() => {
-            editorRef.current?.getAction("editor.action.clipboardCopyAction")?.run();
+            const ed = editorRef.current;
+            if (!ed) return;
+            ed.focus();
+            ed.trigger("keyboard", "editor.action.clipboardCopyAction");
             setCtxMenu(null);
           }}>
             <span className="ctx-item-label">复制</span>
             <span className="ctx-item-shortcut">Ctrl+C</span>
           </button>
           <button className="ctx-item" onClick={() => {
-            editorRef.current?.focus();
-            navigator.clipboard?.readText().then((text: string) => {
-              if (text && editorRef.current) {
-                editorRef.current.trigger("keyboard", "type", { text });
-              }
-            }).catch(() => {});
+            const ed = editorRef.current;
+            if (!ed) return;
+            ed.focus();
+            const api = (window as any).electronAPI;
+            if (api?.clipboardRead) {
+              api.clipboardRead().then((text: string) => {
+                if (text) ed.trigger("keyboard", "type", { text });
+              }).catch(() => {});
+            }
             setCtxMenu(null);
           }}>
             <span className="ctx-item-label">粘贴</span>
             <span className="ctx-item-shortcut">Ctrl+V</span>
           </button>
           <button className="ctx-item" onClick={() => {
-            editorRef.current?.getAction("editor.action.selectAll")?.run();
+            const ed = editorRef.current;
+            if (!ed) return;
+            ed.focus();
+            ed.trigger("keyboard", "editor.action.selectAll");
             setCtxMenu(null);
           }}>
             <span className="ctx-item-label">全选</span>
@@ -334,14 +346,20 @@ function MarkdownEditor({ source, onSourceChange, editorRef, isPreviewMode, onTo
           </button>
           <div className="ctx-separator" />
           <button className="ctx-item" onClick={() => {
-            editorRef.current?.getAction("editor.action.undo")?.run();
+            const ed = editorRef.current;
+            if (!ed) return;
+            ed.focus();
+            ed.trigger("keyboard", "undo");
             setCtxMenu(null);
           }}>
             <span className="ctx-item-label">撤销</span>
             <span className="ctx-item-shortcut">Ctrl+Z</span>
           </button>
           <button className="ctx-item" onClick={() => {
-            editorRef.current?.getAction("editor.action.redo")?.run();
+            const ed = editorRef.current;
+            if (!ed) return;
+            ed.focus();
+            ed.trigger("keyboard", "redo");
             setCtxMenu(null);
           }}>
             <span className="ctx-item-label">重做</span>
