@@ -72,10 +72,7 @@ export const WorkspaceHeader: FC<WorkspaceHeaderProps> = ({
           id="workspace-title-input"
           value={
             currentFile
-              ? (currentFile.name.split("/").pop() || "").replace(
-                  /\.(md|csv|xlsx)$/,
-                  ""
-                )
+              ? (currentFile.name.split("/").pop() || "")
               : folderName
           }
           onCompositionStart={() => {
