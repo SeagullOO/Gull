@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, protocol, Menu, screen, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const { execSync } = require("child_process");
 // electron-updater 是可选依赖，打包时可能不存在
 let autoUpdater = null;
 try {
@@ -333,6 +334,39 @@ ipcMain.handle("selectStoragePath", async () => {
 
 ipcMain.handle("shell:openPath", async (_e, p) => {
   return shell.openPath(p);
+});
+
+// ── 系统字体扫描 ───────────────────────────────────────────────────────
+// 缓存：只扫描一次，后续调用直接返回缓存
+let _cachedFonts = null;
+
+function getSystemFonts() {
+  if (_cachedFonts) return _cachedFonts;
+  try {
+    if (process.platform === "win32") {
+      // PowerShell 通过 System.Drawing 枚举已安装字体
+      const cmd = `powershell -NoProfile -Command "Add-Type -AssemblyName System.Drawing; [System.Drawing.Text.InstalledFontCollection]::new().Families | ForEach-Object { \\$_.Name } | Sort-Object -Unique"`;
+      const output = execSync(cmd, { encoding: "utf-8", timeout: 15000, windowsHide: true });
+      _cachedFonts = output.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    } else if (process.platform === "darwin") {
+      // macOS: system_profiler 查询字体
+      const cmd = `system_profiler SPFontsDataType 2>/dev/null | grep "Family:" | sed 's/.*Family: //' | sort -u`;
+      const output = execSync(cmd, { encoding: "utf-8", timeout: 15000, shell: "/bin/bash" });
+      _cachedFonts = output.split(/\n/).map(s => s.trim()).filter(Boolean);
+    } else {
+      // Linux: fc-list 查询 fontconfig
+      const output = execSync("fc-list : family", { encoding: "utf-8", timeout: 15000 });
+      const lines = output.split(/\n/).flatMap(line => line.split(",").map(s => s.trim()).filter(Boolean));
+      _cachedFonts = [...new Set(lines)].sort();
+    }
+  } catch {
+    _cachedFonts = [];
+  }
+  return _cachedFonts;
+}
+
+ipcMain.handle("font:getSystemFonts", async () => {
+  return getSystemFonts();
 });
 
 // ── Auto-updater IPC ───────────────────────────────────────────────────
