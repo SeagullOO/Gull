@@ -107,19 +107,18 @@ export function useTabDrag({ openTabs, setOpenTabs }: UseTabDragOptions) {
       if (fromIdxMove < 0) return;
 
       const toIndex = computeInsertIndex(e.clientX, fromIdxMove, tabs);
-
-      // 将 post-removal toIndex 映射回原始 DOM 索引定位指示线
-      let domIdx = toIndex;
-      for (let i = 0; i <= domIdx && i < tabs.length; i++) {
-        if (tabs[i].classList.contains("tab-dragging")) { domIdx++; break; }
-      }
-
-      if (indicator && domIdx >= 0 && domIdx < tabs.length) {
-        const targetRect = tabs[domIdx].getBoundingClientRect();
-        indicator.style.left = targetRect.left - 2 + "px";
+      // Compute where to show indicator relative to full DOM array
+      const indicatorOrigIdx = toIndex >= fromIdxMove ? toIndex + 1 : toIndex;
+      if (indicator) {
+        if (indicatorOrigIdx < tabs.length) {
+          indicator.style.left = tabs[indicatorOrigIdx].offsetLeft + "px";
+        } else {
+          const lastTab = tabs[tabs.length - 1];
+          indicator.style.left = (lastTab.offsetLeft + lastTab.offsetWidth) + "px";
+        }
         indicator.style.display = "block";
       }
-    };
+   };
 
     const onUp = (e: MouseEvent) => {
       const d = dragRef.current;

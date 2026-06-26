@@ -833,26 +833,6 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
           />
         ) : (
           <>
-            <WorkspaceHeader
-              folderName={folderName}
-              currentFile={currentFile}
-              isComposing={isComposing}
-              onRenameFile={handleRenameFile}
-              onFolderNameChange={setFolderName}
-              saveStatus={saveStatus}
-              isMdPreview={isMdPreview}
-              onTogglePreview={() => setIsMdPreview((p) => !p)}
-              editorRef={editorRef}
-              hotInstance={hotInstance}
-              hotKey={hotKey}
-              onUndo={handleUndo}
-              onRedo={handleRedo}
-              cellRef={cellRef}
-              formulaValue={formulaValue}
-              isFormulaBarFocused={isFormulaBarFocused}
-              onFormulaValueChange={setFormulaValue}
-            />
-
             {openTabFiles.length === 0 ? (
               <div className="flex-1 flex items-center justify-center">
                 <div className="text-center">
@@ -870,6 +850,26 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
                   onSelectTab={handleTabClick}
                   dropIndicatorRef={dropIndicatorRef}
                   tabBarRef={tabBarRef}
+                />
+
+                <WorkspaceHeader
+                  folderName={folderName}
+                  currentFile={currentFile}
+                  isComposing={isComposing}
+                  onRenameFile={handleRenameFile}
+                  onFolderNameChange={setFolderName}
+                  saveStatus={saveStatus}
+                  isMdPreview={isMdPreview}
+                  onTogglePreview={() => setIsMdPreview((p) => !p)}
+                  editorRef={editorRef}
+                  hotInstance={hotInstance}
+                  hotKey={hotKey}
+                  onUndo={handleUndo}
+                  onRedo={handleRedo}
+                  cellRef={cellRef}
+                  formulaValue={formulaValue}
+                  isFormulaBarFocused={isFormulaBarFocused}
+                  onFormulaValueChange={setFormulaValue}
                 />
 
                 <div ref={wsZoomRef} data-workspace-zoom style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
