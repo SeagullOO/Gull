@@ -5,3 +5,4 @@ design-sketches/
 *.asar
 .DS_Store
 Thumbs.db
+coverage/
