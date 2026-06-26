@@ -675,20 +675,20 @@ function FileExplorer({
               }
             }}
             onClick={(e) => e.stopPropagation()}>
-            <div className="context-menu" style={{ position: "absolute", bottom: 0 }}>
+            <div className="ctx-menu" style={{ position: "absolute", bottom: 0 }}>
               {workspaceMenu.map((w) => (
                 <button key={w.id}
                   onClick={() => { navigate(`/folder/${w.id}`); setWorkspaceMenu(null); }}
-                  className="context-menu-item">{w.name}</button>
+                  className="ctx-item">{w.name}</button>
               ))}
-              <div className="context-menu-divider" />
+              <div className="ctx-separator" />
               <button
                 onClick={() => {
                   setWorkspaceMenu(null);
                   const fn = (window as any).__openWorkspace;
                   if (fn) fn(); else alert("此功能仅在桌面应用中可用");
                 }}
-                className="context-menu-item">{t("openOtherWorkspace", lang)}</button>
+                className="ctx-item">{t("openOtherWorkspace", lang)}</button>
             </div>
           </div>,
           document.body
@@ -766,32 +766,32 @@ function FileExplorer({
       {/* 右键上下文菜单：通过 Portal 渲染到 body，根据点击目标类型显示不同菜单项 */}
       {/* contextMenu.fileId 存在 → 文件节点菜单 / contextMenu.folderPath 存在 → 文件夹节点菜单 / 都不存在 → 空白区菜单 */}
       {contextMenu && createPortal(
-        <div className="fixed z-50 context-menu animate-in" style={{ left: contextMenu.x, top: contextMenu.y }}
+        <div className="fixed z-50 ctx-menu animate-in" style={{ left: contextMenu.x, top: contextMenu.y }}
           onClick={(e) => e.stopPropagation()}>
           {/* 文件节点右键菜单：重命名 + 删除 */}
           {contextMenu.fileId ? (
             <>
               <button onClick={() => { const file = files.find((f) => f.id === contextMenu.fileId); if (file) handleRenameStart(file); }}
-                className="context-menu-item">{t("rename", lang)}</button>
-              <div className="context-menu-divider" />
+                className="ctx-item">{t("rename", lang)}</button>
+              <div className="ctx-separator" />
               <button onClick={() => { onDeleteFile(contextMenu.fileId!); setContextMenu(null); }}
-                className="context-menu-item danger">{t("delete", lang)}</button>
+                className="ctx-item ctx-danger">{t("delete", lang)}</button>
             </>
           ) : contextMenu.folderPath ? (
             <>
               <button onMouseDown={(e) => e.preventDefault()} onClick={() => { setRenamingFolder(contextMenu.folderPath!); setFolderRenameValue(contextMenu.folderPath!); setContextMenu(null); }}
-                className="context-menu-item">{t("rename", lang)}</button>
-              <div className="context-menu-divider" />
+                className="ctx-item">{t("rename", lang)}</button>
+              <div className="ctx-separator" />
               <button onMouseDown={(e) => e.preventDefault()} onClick={() => { handleNewFolder(); setContextMenu(null); }}
-                className="context-menu-item">{t("newFolder", lang)}</button>
-              <div className="context-menu-divider" />
+                className="ctx-item">{t("newFolder", lang)}</button>
+              <div className="ctx-separator" />
               <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
                 onClick={() => { if (confirm(t("confirmDeleteFolderContent", lang))) { onDeleteFolder(contextMenu.folderPath!); } setContextMenu(null); }}
-                className="context-menu-item danger">{t("delete", lang)}</button>
+                className="ctx-item ctx-danger">{t("delete", lang)}</button>
             </>
           ) : (
             <button onClick={() => { handleNewFolder(); setContextMenu(null); }}
-              className="context-menu-item">{t("newFolder", lang)}</button>
+              className="ctx-item">{t("newFolder", lang)}</button>
           )}
         </div>,
         document.body
