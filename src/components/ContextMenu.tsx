@@ -120,14 +120,14 @@ function dispatchAction(key: string, hot: any, selection: [number, number, numbe
       if (cp) cp.copy();
       break;
     }
-    case "paste":
-      navigator.clipboard?.readText().then((text: string) => {
-        if (!text || hot.isDestroyed) return;
-        const rows = text.split("\n").filter((r: string) => r.length > 0);
-        const data = rows.map((r: string) => r.split("\t"));
-        hot.populateFromArray(r1, c1, data);
-      }).catch(() => {});
+    case "paste": {
+      const cp = hot.getPlugin("copyPaste");
+      console.log("[GULL-PASTE-EXCEL] copyPaste plugin:", !!cp, typeof cp?.paste);
+      if (cp && typeof cp.paste === "function") {
+        cp.paste();
+      }
       break;
+    }
     case "ctx_row_above": hot.alter("insert_row_above", r1, 1); break;
     case "ctx_row_below": hot.alter("insert_row_above", r2 + 1, 1); break;
     case "ctx_col_left": hot.alter("insert_col_start", c1, 1); break;

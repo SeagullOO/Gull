@@ -319,15 +319,23 @@ function MarkdownEditor({ source, onSourceChange, editorRef, isPreviewMode, onTo
             <span className="ctx-item-label">复制</span>
             <span className="ctx-item-shortcut">Ctrl+C</span>
           </button>
-          <button className="ctx-item" onClick={() => {
+          <button className="ctx-item" onClick={async (e) => {
+            e.stopPropagation();
             const ed = editorRef.current;
             if (!ed) return;
             ed.focus();
-            const api = (window as any).electronAPI;
-            if (api?.clipboardRead) {
-              api.clipboardRead().then((text: string) => {
-                if (text) ed.trigger("keyboard", "type", { text });
-              }).catch(() => {});
+            try {
+              const clipboardText = (window as any).electronAPI?.clipboardRead?.();
+              if (clipboardText) {
+                const selection = ed.getSelection();
+                if (selection) {
+                  ed.executeEdits("clipboard-paste", [
+                    { range: selection, text: clipboardText, forceMoveMarkers: true },
+                  ]);
+                }
+              }
+            } catch (err) {
+              console.error("[GULL-MD-PASTE] Failed:", err);
             }
             setCtxMenu(null);
           }}>
