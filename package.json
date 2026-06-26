@@ -10,7 +10,10 @@
     "vendor:update": "node scripts/download-vendor.mjs",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .\"",
     "electron:build": "vite build && cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ electron-builder --win portable",
-    "electron:start": "electron ."
+    "electron:start": "electron .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
@@ -39,16 +42,19 @@
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "@vitest/coverage-v8": "^4.1.9",
     "autoprefixer": "^10.4.20",
     "concurrently": "^10.0.3",
     "cross-env": "^10.1.0",
     "electron": "^42.4.1",
     "electron-builder": "^26.15.3",
+    "jsdom": "^29.1.1",
     "playwright": "^1.61.1",
     "postcss": "^8.4.41",
     "tailwindcss": "^3.4.10",
     "typescript": "^5.5.4",
     "vite": "^5.4.2",
+    "vitest": "^4.1.9",
     "wait-on": "^9.0.10"
   },
   "build": {
