@@ -212,6 +212,15 @@ function ExcelToolbar({ hot, onUndo, onRedo }: ExcelToolbarProps) {
     }
   };
 
+  const handleUnderline = () => {
+    if (hot && !hot.isDestroyed) {
+      const sel = hot.getSelected();
+      if (sel && sel.length > 0) {
+        applyToSelection("_underline", (cur: boolean) => !cur);
+      }
+    }
+  };
+
   const handleFontSize = (size: number) => {
     setFontSizeOpen(false);
     applyToSelection("_fontSize", size);
@@ -471,6 +480,7 @@ function ExcelToolbar({ hot, onUndo, onRedo }: ExcelToolbarProps) {
 
       {/* ── Underline ── */}
       <ToolbarButton
+        onClick={handleUnderline}
         title={t("underline", lang) + " Ctrl+U"}
         style={{ minWidth: 30, textDecoration: "underline", fontSize: 13, justifyContent: "center" }}
       >
