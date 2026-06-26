@@ -32,7 +32,7 @@ export interface WorkspaceHeaderProps {
   hotKey: number;
   onUndo: () => void;
   onRedo: () => void;
-  cellRef: React.MutableRefObject<string>;
+  cellRef: string;
   formulaValue: string;
   isFormulaBarFocused: React.MutableRefObject<boolean>;
   onFormulaValueChange: (v: string) => void;
