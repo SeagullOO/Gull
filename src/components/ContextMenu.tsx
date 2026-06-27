@@ -125,25 +125,13 @@ function dispatchAction(key: string, hot: any, selection: [number, number, numbe
       if (cp && typeof cp.paste === "function") {
         cp.paste();
       } else {
-        // Fallback: clipboard module or API not available — use async clipboard read
-        (async () => {
-          let text = "";
-          try {
-            text = await navigator.clipboard.readText();
-          } catch {
-            text = (window as any).electronAPI?.clipboardRead?.() || "";
-          }
-          if (text && selection && selection[0]) {
-            const [r1, c1] = selection[0];
-            const rows = text.split("\n");
-            for (let ri = 0; ri < rows.length; ri++) {
-              const cols = rows[ri].split("\t");
-              for (let ci = 0; ci < cols.length; ci++) {
-                hot.setDataAtCell(r1 + ri, c1 + ci, cols[ci]);
-              }
-            }
-          }
-        })();
+        // Fallback: 在 Handsontable DOM 中派发原生 paste 事件
+        const root = hot.rootElement as HTMLElement | undefined;
+        if (root) {
+          root.dispatchEvent(new ClipboardEvent("paste", {
+            bubbles: true, cancelable: true,
+          }));
+        }
       }
       break;
     }

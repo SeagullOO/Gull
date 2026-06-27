@@ -97,6 +97,8 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      // 允许在 dev 模式下使用 DevTools（配合 contextIsolation）
+      ...(isDev ? { devTools: true } : {}),
     },
   };
 

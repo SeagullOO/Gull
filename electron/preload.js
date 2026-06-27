@@ -1,9 +1,11 @@
 const { contextBridge, ipcRenderer, clipboard } = require("electron");
 
+console.log("[PRELOAD] starting, clipboard:", !!clipboard);
+
 contextBridge.exposeInMainWorld("electronAPI", {
-  // Generic IPC
-  send: (channel, ...args) => ipcRenderer.send(channel, ...args),
-  invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
+    // Generic IPC
+    send: (channel, ...args) => ipcRenderer.send(channel, ...args),
+    invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
 
   // File-based storage
   readFile: (filename) => ipcRenderer.invoke("fs:readFile", filename),
@@ -40,9 +42,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Font
   getSystemFonts: () => ipcRenderer.invoke("font:getSystemFonts"),
 
-  // Clipboard — 使用 Electron 原生 clipboard 模块，绕过浏览器权限限制
-  clipboardRead: () => { const t = clipboard.readText(); console.log("[PRELOAD-CLIP] readText:", t?.length); return t; },
-  clipboardWrite: (text) => { console.log("[PRELOAD-CLIP] writeText:", text?.length); clipboard.writeText(text); },
+  // Clipboard
+  clipboardRead: () => clipboard.readText(),
+  clipboardWrite: (text) => clipboard.writeText(text),
 
   // Window controls
   windowClose: () => ipcRenderer.send("window-close"),
@@ -65,3 +67,4 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () => events.forEach((e) => ipcRenderer.removeAllListeners(e));
   },
 });
+console.log("[PRELOAD] electronAPI exposed successfully");
