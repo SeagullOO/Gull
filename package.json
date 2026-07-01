@@ -17,6 +17,8 @@
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
+    "@tiptap/core": "^3.27.1",
+    "@tiptap/extension-color": "^3.27.1",
     "@tiptap/extension-image": "^3.27.1",
     "@tiptap/extension-link": "^3.27.1",
     "@tiptap/extension-table": "^3.27.1",
@@ -24,7 +26,9 @@
     "@tiptap/extension-table-header": "^3.27.1",
     "@tiptap/extension-table-row": "^3.27.1",
     "@tiptap/extension-text-align": "^3.27.1",
+    "@tiptap/extension-text-style": "^3.27.1",
     "@tiptap/extension-underline": "^3.27.1",
+    "@tiptap/pm": "^3.27.1",
     "@tiptap/react": "^3.27.1",
     "@tiptap/starter-kit": "^3.27.1",
     "dexie": "^4.0.8",
@@ -36,7 +40,8 @@
     "monaco-editor": "^0.55.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.26.0"
+    "react-router-dom": "^6.26.0",
+    "tiptap-community-pages": "^0.1.2"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",

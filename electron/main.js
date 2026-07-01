@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog, protocol, Menu, screen, shell, clip
 const path = require("path");
 const fs = require("fs");
 const { execSync } = require("child_process");
+const { resolveDataPath } = require("./storagePaths.cjs");
 // electron-updater 是可选依赖，打包时可能不存在
 let autoUpdater = null;
 try {
@@ -62,15 +63,7 @@ function migrateIfNeeded() {
       fs.cpSync(oldDataPath, newDataPath, { recursive: true });
     } catch {}
   }
-  // Migrate storage-config
-  const oldConfig = path.join(app.getPath("userData"), "storage-config.json");
   const newConfigDir = path.join(getAppRoot(), "config");
-  if (fs.existsSync(oldConfig) && !fs.existsSync(path.join(newConfigDir, "storage-config.json"))) {
-    try {
-      if (!fs.existsSync(newConfigDir)) fs.mkdirSync(newConfigDir, { recursive: true });
-      fs.copyFileSync(oldConfig, path.join(newConfigDir, "storage-config.json"));
-    } catch {}
-  }
   // Migrate window state
   const oldState = path.join(app.getPath("userData"), "window-state.json");
   if (fs.existsSync(oldState) && !fs.existsSync(path.join(newConfigDir, "window-state.json"))) {
@@ -97,8 +90,7 @@ function getStorageConfig() {
 
 function getDataPath() {
   const cfg = getStorageConfig();
-  const defaultDir = path.join(getAppRoot(), "data");
-  const dataDir = cfg.customPath || defaultDir;
+  const dataDir = resolveDataPath(getAppRoot(), cfg);
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
   return dataDir;
 }
@@ -140,8 +132,8 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      // 允许在 dev 模式下使用 DevTools（配合 contextIsolation）
-      ...(isDev ? { devTools: true } : {}),
+      sandbox: false,  // preload need require("electron") — sandbox block it
+      ...(isDev ? { devTools: true } : { devTools: true }),
     },
   };
 
@@ -208,28 +200,34 @@ function createWindow() {
 ipcMain.handle("fs:readFile", async (_e, filename) => {
   const fp = path.join(getDataPath(), filename);
   try { return fs.existsSync(fp) ? fs.readFileSync(fp, "utf-8") : null; }
-  catch { return null; }
+  catch (e) { console.error("[fs:readFile ERROR]", e); return null; }
 });
 ipcMain.handle("fs:readFileBinary", async (_e, filename) => {
   const fp = path.join(getDataPath(), filename);
   try {
     if (!fs.existsSync(fp)) return null;
     return fs.readFileSync(fp).toString("base64");
-  } catch { return null; }
+  } catch (e) { console.error("[fs:readFileBinary ERROR]", e); return null; }
 });
 ipcMain.handle("fs:writeFile", async (_e, filename, data) => {
-  try { fs.writeFileSync(path.join(getDataPath(), filename), data, "utf-8"); return true; }
-  catch { return false; }
+  const fp = path.join(getDataPath(), filename);
+  console.log("[fs:writeFile]", fp, "size:", data?.length ?? 0);
+  try {
+    fs.writeFileSync(fp, data, "utf-8");
+    return true;
+  } catch (e) { console.error("[fs:writeFile ERROR]", e.code, e.message); return false; }
 });
 ipcMain.handle("fs:writeFileBinary", async (_e, filename, base64Data) => {
+  const fp = path.join(getDataPath(), filename);
+  console.log("[fs:writeFileBinary]", fp, "base64 size:", base64Data?.length ?? 0);
   try {
     const buf = Buffer.from(base64Data, "base64");
-    const fp = path.join(getDataPath(), filename);
     const d = path.dirname(fp);
     if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
     fs.writeFileSync(fp, buf);
+    console.log("[fs:writeFileBinary] SUCCESS:", fp, buf.length, "bytes");
     return true;
-  } catch { return false; }
+  } catch (e) { console.error("[fs:writeFileBinary ERROR]", e.code, e.message); return false; }
 });
 ipcMain.handle("fs:deleteFile", async (_e, filename) => {
   try { const fp = path.join(getDataPath(), filename); if (fs.existsSync(fp)) fs.unlinkSync(fp); return true; }

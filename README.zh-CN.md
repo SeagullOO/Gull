@@ -192,4 +192,3 @@ MIT © SeagullOO
 - [Handsontable](https://handsontable.com/) — 类 Excel 的电子表格引擎
 - [TipTap](https://tiptap.dev/) — 基于 ProseMirror 的现代富文本编辑器
 - [Electron](https://electronjs.org) — 用 Web 技术构建跨平台桌面应用
-- Obsidian 的暗色主题配色灵感

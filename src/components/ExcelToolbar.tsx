@@ -4,6 +4,8 @@ import { ToolbarContainer, ToolbarButton, ToolbarDivider } from "./Toolbar";
 import { pushMetaUndo, type MetaCellSnapshot } from "../hooks/useMetaUndo";
 import DropPanel from "./DropPanel";
 import CustomColorPicker from "./CustomColorPicker";
+import ColorPickerPanel from "./ColorPickerPanel";
+import { getDefaultFontColor, pushRecentColor } from "./ColorPickerPanel";
 
 /**
  * ExcelToolbar — Handsontable 电子表格格式工具栏
@@ -24,7 +26,8 @@ import CustomColorPicker from "./CustomColorPicker";
  *   - z-index: 99999，确保在所有 UI 层之上
  *   - data-color-panel 属性标记，供 click-away handler 排除判断
  *
- * 【架构 - renderColorGrid（颜色选择网格）】
+ * 【架构 - ColorPickerPanel（共享颜色选择面板）】
+ *   - 独立组件 src/components/ColorPickerPanel.tsx（与 DocxToolbar 共享）
  *   - 主题色 THEME_COLORS: 2 行 x 7 列
  *   - 标准色 STANDARD_COLORS: 2 行 x 7 列
  *   - 最近使用 recentColors: 1 行 x 7 列（不含选中标记）
@@ -61,24 +64,7 @@ interface ExcelToolbarProps {
 // 可选的字体大小列表（像素值），参考 Excel 标准字号
 const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36];
 
-// ── 颜色预设：主题色 2 行 × 7 列 ──────────────────────────────────────
-const THEME_COLORS = [
-  "#E1EAFF", "#4E83FD", "#3370FF", "#D5F6F2", "#00D6B9", "#04B49C", "#ECE2FE",
-  "#7F3BF5", "#6425D0", "#FDE1E1", "#F76964", "#F54A45", "#E8F7E0", "#34C724",
-];
-
-const STANDARD_COLORS = [
-  "#C00000", "#FF0000", "#FFC000", "#FFFF00", "#92D050", "#00B050", "#00B0F0",
-  "#0070C0", "#002060", "#7030A0", "#FFFFFF", "#D6D6D6", "#ADADAD", "#808080",
-];
-
-const MAX_RECENT = 7;
-
 // ── 组件主体 ──────────────────────────────────────────────────────────────
-
-/** 根据当前主题返回默认字体颜色（暗色模式浅灰，亮色模式黑色） */
-const getDefaultFontColor = () =>
-  document.documentElement.classList.contains("light") ? "#000000" : "#A5A5A5";
 
 function ExcelToolbar({ hot, onUndo, onRedo }: ExcelToolbarProps) {
   const lang = getLang();
@@ -263,6 +249,7 @@ function ExcelToolbar({ hot, onUndo, onRedo }: ExcelToolbarProps) {
     setFontColorOpen(false);
     setCurrentFontColor(color);
     fontIsDefaultRef.current = false;
+    pushRecent(color);
     applyToSelection("_color", color);
   };
 
@@ -283,6 +270,7 @@ function ExcelToolbar({ hot, onUndo, onRedo }: ExcelToolbarProps) {
   const handleBgColor = (color: string) => {
     setBgColorOpen(false);
     setCurrentBgColor(color);
+    pushRecent(color);
     applyToSelection("_bgColor", color);
   };
 
@@ -338,113 +326,10 @@ function ExcelToolbar({ hot, onUndo, onRedo }: ExcelToolbarProps) {
   const fontColorPanelRef = useRef<HTMLDivElement>(null);
   const bgColorPanelRef = useRef<HTMLDivElement>(null);
 
-  // ── 添加到最近使用颜色（去重 + 限制最大 7 个） ──
+  // ── 添加到最近使用颜色 ──
   const pushRecent = (hex: string) => {
-    setRecentColors((prev) => [hex, ...prev.filter((c) => c !== hex)].slice(0, MAX_RECENT));
+    setRecentColors((prev) => pushRecentColor(prev, hex));
   };
-
-  // ── Color swatch (18px, selected: blue outline ring + checkmark) ──
-  const renderColorSwatch = (
-    color: string,
-    onPick: (c: string) => void,
-    selected?: boolean,
-  ) => {
-    const isWhite = color.toUpperCase() === "#FFFFFF";
-    return (
-      <div
-        key={color}
-        onClick={(e) => { e.stopPropagation(); onPick(color); pushRecent(color); }}
-        title={color}
-        style={{
-          width: 18, height: 18,
-          background: color,
-          borderRadius: 2,
-          cursor: "pointer",
-          border: selected ? "2px solid #1456F0" : isWhite ? "1px solid var(--border-medium)" : "2px solid transparent",
-          outline: selected ? "1px solid #1456F0" : "none",
-          outlineOffset: 1,
-          transition: "transform 0.1s",
-          flexShrink: 0,
-          position: "relative",
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}
-        onMouseEnter={(e) => { e.currentTarget.style.transform = "scale(1.12)"; }}
-        onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
-      >
-        {selected && (
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="20 6 9 17 4 12" />
-          </svg>
-        )}
-      </div>
-    );
-  };
-
-  // ── Color grid with sections (design spec layout) ──
-  const renderColorGrid = (
-    currentColor: string,
-    onPick: (color: string) => void,
-    onClear: () => void,
-    onOpenCustom: () => void,
-  ) => (
-    <div>
-      {/* Reset to default */}
-      <div style={{ padding: "4px 10px 2px" }}>
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onClear(); }}
-          style={{
-            width: "100%", padding: "3px 0", borderRadius: 3, cursor: "pointer",
-            background: "transparent", border: "1px solid var(--border-subtle)",
-            color: "var(--text-secondary)", fontSize: 11,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            transition: "background 0.1s",
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-        >
-          {t("resetToDefault", lang)}
-        </button>
-      </div>
-      <div style={{ height: 1, background: "var(--border-subtle)", margin: "2px 10px" }} />
-      {/* Theme Colors — 2 rows × 7 */}
-      <div style={{ fontSize: 9, fontWeight: 500, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: "0.06em", padding: "2px 10px 2px" }}>{t("themeColors", lang)}</div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 5, padding: "0 10px 4px", justifyItems: "center" }}>
-        {THEME_COLORS.map((c) => renderColorSwatch(c, onPick, currentColor === c))}
-      </div>
-      <div style={{ height: 1, background: "var(--border-subtle)", margin: "2px 10px" }} />
-      {/* Standard Colors — 2 rows × 7 */}
-      <div style={{ fontSize: 9, fontWeight: 500, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: "0.06em", padding: "4px 10px 2px" }}>{t("standardColors", lang)}</div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 5, padding: "0 10px 4px", justifyItems: "center" }}>
-        {STANDARD_COLORS.map((c) => renderColorSwatch(c, onPick, currentColor === c))}
-      </div>
-      <div style={{ height: 1, background: "var(--border-subtle)", margin: "2px 10px" }} />
-      {/* Recent Colors — 1 row × 7, no selection highlight */}
-      <div style={{ fontSize: 9, fontWeight: 500, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: "0.06em", padding: "4px 10px 2px" }}>{t("recentColors", lang)}</div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 5, padding: "0 10px 4px", justifyItems: "center" }}>
-        {recentColors.map((c) => renderColorSwatch(c, onPick))}
-      </div>
-      <div style={{ height: 1, background: "var(--border-subtle)", margin: "2px 10px" }} />
-      {/* Bottom bar — "更多颜色" link, equal all sides */}
-      <div style={{ padding: "4px 6px" }}>
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onOpenCustom(); }}
-          style={{
-            width: "100%", padding: "4px 0", borderRadius: 3, cursor: "pointer",
-            background: "transparent", border: "none",
-            color: "var(--text-secondary)", fontSize: 11,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            transition: "background 0.1s",
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-        >
-          {t("moreColors", lang)}
-        </button>
-      </div>
-    </div>
-  );
 
   // ── Undo / Redo SVG icons ──
   const UndoIcon = (
@@ -586,12 +471,14 @@ function ExcelToolbar({ hot, onUndo, onRedo }: ExcelToolbarProps) {
           />
         </ToolbarButton>
         <DropPanel triggerRef={fontColorBtnRef} open={fontColorOpen} panelRef={fontColorPanelRef}>
-          {renderColorGrid(
-            currentFontColor,
-            handleFontColor,
-            handleResetFontColor,
-            () => { if (fontColorPanelRef.current) openCustomColor("font", fontColorPanelRef.current); },
-          )}
+          <ColorPickerPanel
+            currentColor={currentFontColor}
+            recentColors={recentColors}
+            onPick={handleFontColor}
+            onClear={handleResetFontColor}
+            onOpenCustom={() => { if (fontColorPanelRef.current) openCustomColor("font", fontColorPanelRef.current); }}
+            lang={lang}
+          />
         </DropPanel>
       </div>
 
@@ -643,12 +530,14 @@ function ExcelToolbar({ hot, onUndo, onRedo }: ExcelToolbarProps) {
           />
         </ToolbarButton>
         <DropPanel triggerRef={bgColorBtnRef} open={bgColorOpen} panelRef={bgColorPanelRef}>
-          {renderColorGrid(
-            currentBgColor,
-            handleBgColor,
-            handleClearBgColor,
-            () => { if (bgColorPanelRef.current) openCustomColor("bg", bgColorPanelRef.current); },
-          )}
+          <ColorPickerPanel
+            currentColor={currentBgColor}
+            recentColors={recentColors}
+            onPick={handleBgColor}
+            onClear={handleClearBgColor}
+            onOpenCustom={() => { if (bgColorPanelRef.current) openCustomColor("bg", bgColorPanelRef.current); }}
+            lang={lang}
+          />
         </DropPanel>
       </div>
 

@@ -12,11 +12,13 @@
 import { type FC, useState, useCallback } from "react";
 import type { FolderFile } from "../types";
 import type * as Monaco from "monaco-editor";
+import type { Editor } from "@tiptap/react";
 import { t, getLang } from "../i18n";
 import StatusBadge from "./StatusBadge";
 import EditorToolbar from "./EditorToolbar";
 import ExcelToolbar from "./ExcelToolbar";
 import FormulaBar from "./FormulaBar";
+import DocxToolbar from "./DocxToolbar";
 
 export interface WorkspaceHeaderProps {
   folderName: string;
@@ -36,6 +38,7 @@ export interface WorkspaceHeaderProps {
   formulaValue: string;
   isFormulaBarFocused: React.MutableRefObject<boolean>;
   onFormulaValueChange: (v: string) => void;
+  docxEditor: Editor | null;
 }
 
 /** 提取文件扩展名（含点），如 ".md" ".xlsx" ".csv"，无扩展名返回 "" */
@@ -72,6 +75,7 @@ export const WorkspaceHeader: FC<WorkspaceHeaderProps> = ({
   formulaValue,
   isFormulaBarFocused,
   onFormulaValueChange,
+  docxEditor,
 }) => {
   const lang = getLang();
 
@@ -156,11 +160,13 @@ export const WorkspaceHeader: FC<WorkspaceHeaderProps> = ({
                 const defaultBase =
                   currentFile.type === "md"
                     ? t("untitledDocument", lang).replace(/\.md$/, "")
+                    : currentFile.type === "docx"
+                    ? t("untitledDocx", lang)
                     : t("untitledSheet", lang);
                 const ext = getExt(currentFile.name);
                 const dir = getDir(currentFile.name);
                 const extFinal =
-                  ext || (currentFile.type === "md" ? ".md" : ".xlsx");
+                  ext || (currentFile.type === "md" ? ".md" : currentFile.type === "docx" ? ".docx" : ".xlsx");
                 const fallbackName = dir
                   ? `${dir}/${defaultBase}${extFinal}`
                   : `${defaultBase}${extFinal}`;
@@ -262,6 +268,8 @@ export const WorkspaceHeader: FC<WorkspaceHeaderProps> = ({
           />
         </>
       )}
+      {/* DOCX toolbar */}
+      {currentFile?.type === "docx" && <DocxToolbar editor={docxEditor} />}
     </>
   );
 };

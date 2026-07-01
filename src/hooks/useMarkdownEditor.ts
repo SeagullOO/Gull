@@ -32,6 +32,7 @@ import type * as Monaco from "monaco-editor";
 import { storageGetFolder, storageUpdateFolder, storageWriteWorkspaceFile } from "../storage";
 import type { FolderFile } from "../types";
 import { extractTextFromJson } from "./markdown-converter";
+import { resolveMarkdownLoadText, selectMarkdownSaveText } from "../utils/defaultFileContent";
 
 /**
  * useMarkdownEditor — raw markdown 源文本编辑与自动保存
@@ -70,12 +71,6 @@ export function useMarkdownEditor(
    */
   useEffect(() => {
     if (!currentFile || currentFile.type !== "md") return;
-    const cached = fileCache.current[currentFile.id];
-    if (cached !== undefined) {
-      setSource(cached);
-      lastSaved.current = cached;
-      return;
-    }
     const content = currentFile.content;
     let text = "";
     if (typeof content === "string") {
@@ -84,10 +79,11 @@ export function useMarkdownEditor(
       // 旧格式 TipTap JSON：提取纯文本内容作为 markdown
       text = extractTextFromJson(content);
     }
-    fileCache.current[currentFile.id] = text;
-    setSource(text);
+    const nextText = resolveMarkdownLoadText(fileCache.current[currentFile.id], text, lastSaved.current);
+    fileCache.current[currentFile.id] = nextText;
+    setSource(nextText);
     lastSaved.current = text;
-  }, [currentFile?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentFile?.id, currentFile?.content]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * 防抖自动保存
@@ -109,11 +105,13 @@ export function useMarkdownEditor(
     if (source === lastSaved.current) return;
     setSaveStatus("unsaved");
     saveTimer.current = setTimeout(async () => {
-      const text = source;
+      const text = selectMarkdownSaveText(source, editorRef.current?.getValue());
       setSaveStatus("saving");
       try {
         if (currentFile && folderName && (window as any).electronAPI) {
           await storageWriteWorkspaceFile(folderName, currentFile.name, text);
+          currentFile.content = text;
+          currentFile.updatedAt = Date.now();
         } else {
           const f = await storageGetFolder(folderId);
           if (!f) return;
@@ -146,13 +144,15 @@ export function useMarkdownEditor(
   const handleForceSave = useCallback(async () => {
     const file = currentFileRef.current;
     if (!file || file.type !== "md" || !folderId) return;
-    const text = source;
+    const text = selectMarkdownSaveText(source, editorRef.current?.getValue());
     const fileId = file.id;
     const fileName = file.name;
     setSaveStatus("saving");
     try {
       if (folderName && (window as any).electronAPI) {
         await storageWriteWorkspaceFile(folderName, fileName, text);
+        file.content = text;
+        file.updatedAt = Date.now();
       } else {
         const f = await storageGetFolder(folderId);
         if (!f) return;

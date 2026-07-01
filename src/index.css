@@ -12,6 +12,7 @@
 @import './styles/handsontable.css';
 @import './styles/markdown.css';
 @import './styles/monaco.css';
+@import 'tiptap-community-pages/styles.css';
 @import './styles/tiptap.css';
 
 @tailwind base;

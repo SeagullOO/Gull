@@ -238,7 +238,9 @@ export async function storageWriteWorkspaceFile(folderName: string, relPath: str
   if (!isElectron) return false;
   const dir = relPath.includes("/") ? relPath.split("/").slice(0, -1).join("/") : "";
   if (dir) await window.electronAPI!.mkdir(`${folderName}/${dir}`);
-  return window.electronAPI!.writeFile(`${folderName}/${relPath}`, content);
+  const ok = await window.electronAPI!.writeFile(`${folderName}/${relPath}`, content);
+  if (!ok) throw new Error(`Write failed: ${folderName}/${relPath}`);
+  return true;
 }
 
 /** 写/创建工作区文件（二进制 base64） */
@@ -246,13 +248,17 @@ export async function storageWriteWorkspaceFileBinary(folderName: string, relPat
   if (!isElectron) return false;
   const dir = relPath.includes("/") ? relPath.split("/").slice(0, -1).join("/") : "";
   if (dir) await window.electronAPI!.mkdir(`${folderName}/${dir}`);
-  return window.electronAPI!.writeFileBinary(`${folderName}/${relPath}`, base64Content);
+  const ok = await window.electronAPI!.writeFileBinary(`${folderName}/${relPath}`, base64Content);
+  if (!ok) throw new Error(`Write failed: ${folderName}/${relPath}`);
+  return true;
 }
 
 /** 删除工作区文件 */
 export async function storageDeleteWorkspaceFile(folderName: string, relPath: string): Promise<boolean> {
   if (!isElectron) return false;
-  return window.electronAPI!.deleteFile(`${folderName}/${relPath}`);
+  const ok = await window.electronAPI!.deleteFile(`${folderName}/${relPath}`);
+  if (!ok) throw new Error(`Delete failed: ${folderName}/${relPath}`);
+  return true;
 }
 
 /** 重命名/移动工作区文件或目录 */
@@ -272,7 +278,9 @@ export async function storageCreateWorkspaceDir(folderName: string, dirPath: str
 /** 删除工作区子目录 */
 export async function storageDeleteWorkspaceDir(folderName: string, dirPath: string): Promise<boolean> {
   if (!isElectron) return false;
-  return window.electronAPI!.rmdir(`${folderName}/${dirPath}`);
+  const ok = await window.electronAPI!.rmdir(`${folderName}/${dirPath}`);
+  if (!ok) throw new Error(`Delete failed: ${folderName}/${dirPath}`);
+  return true;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

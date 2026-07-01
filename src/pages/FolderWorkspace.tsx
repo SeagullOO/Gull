@@ -47,7 +47,9 @@ import { generateId } from "../types";
 import type { Folder, FolderFile, Template } from "../types";
 import { useExcelEditor } from "../hooks/useExcelEditor";
 import { useMarkdownEditor } from "../hooks/useMarkdownEditor";
+import { useDocxEditor } from "../hooks/useDocxEditor";
 import MarkdownEditor from "../components/MarkdownEditor";
+import DocxEditor from "../components/DocxEditor";
 import { useFileTabs } from "../hooks/useFileTabs";
 import { useTabDrag } from "../hooks/useTabDrag";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
@@ -55,26 +57,15 @@ import { useWorkspaceZoom } from "../hooks/useWorkspaceZoom";
 import { exportFolder } from "../utils/exportUtils";
 import { ZOOM_REFERENCE, PANEL_WIDTH, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH, SPLITTER_WIDTH, SPLITTER_HIT } from "../config";
 import { dataToCsv, csvToData, storageReadWorkspaceFileBinary, storageWriteWorkspaceFileBinary } from "../storage";
-import { dataToXlsxBase64, xlsxBase64ToData, createEmptyXlsxBase64 } from "../utils/xlsxUtils";
+import { dataToXlsxBase64, xlsxBase64ToData, createEmptyXlsxBase64, base64ToArrayBuffer } from "../utils/xlsxUtils";
+import { docxExtractHtml, docxToHtml, htmlToDocxBase64 } from "../utils/docxUtils";
+import { getSaveHandler } from "../utils/saveRouting";
+import { makeDefaultExcelContent, makeDefaultMdContent, parseMarkdownDiskContent } from "../utils/defaultFileContent";
 import SaveAsTemplateModal from "../components/SaveAsTemplateModal";
 import ConfirmModal from "../components/ConfirmModal";
 
-/** 新建 Markdown 文件的默认内容（TipTap 文档结构） */
-const defaultMdContent = { type: "doc", content: [{ type: "paragraph" }] };
-
 /** 新建 Docx 文件的默认内容（Tiptap HTML） */
 const defaultDocxContent = "<p></p>";
-
-/** 新建 Excel 文件的默认内容（26 列 x 100 行空表格） */
-function makeDefaultExcelContent() {
-  const cols = 26;
-  const rows = 100;
-  const colHeaders: string[] = [];
-  for (let i = 0; i < cols; i++) colHeaders.push(String.fromCharCode(65 + i));
-  const data = Array.from({ length: rows }, () => Array(cols).fill(""));
-  return { data, colHeaders };
-}
-const defaultExcelContent = makeDefaultExcelContent();
 
 // ─── 主组件 ─────────────────────────────────────────────────────────────────
 
@@ -120,7 +111,7 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
   const isElectron = typeof window !== "undefined" && "electronAPI" in window;
 
   // ─── File tabs ─────────────────────────────────────────────────────────
-  const { openTabs, currentFileId, setCurrentFileId, setOpenTabs, handleSelectTab, handleCloseTab } = useFileTabs();
+  const { openTabs, currentFileId, setCurrentFileId, setOpenTabs, handleSelectTab, handleCloseTab, cleanupDeletedFile } = useFileTabs();
   const currentFile = folder?.files.find((f) => f.id === currentFileId) ?? null;
 
   // ─── 缩放系统（Ctrl+滚轮，localStorage 持久化）────────────────────────
@@ -137,7 +128,7 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
     if (!isDisk || !folder || !currentFile || !folderId) return;
     const rawContent = currentFile.content;
     let isEmpty = false;
-    if (currentFile.type === "md") {
+    if (currentFile.type === "md" || currentFile.type === "docx") {
       isEmpty = !rawContent || (typeof rawContent === "string" && rawContent === "");
     } else {
       // Excel: 空字符串、空对象或占位数据（storageListWorkspaceFiles 创建的 {data:[[]]}）视为未加载
@@ -201,6 +192,26 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
         }
       }
 
+      // Docx：读取 .docx 二进制 → 提取 HTML
+      if (currentFile.type === "docx") {
+        const docxBase64 = await storageReadWorkspaceFileBinary(folder.name, fileName);
+        if (!docxBase64) return;
+        try {
+          const docxArrayBuffer = base64ToArrayBuffer(docxBase64);
+          // 优先尝试 Gull 格式（含 gull-content.html），失败则用 mammoth 通用解析
+          let html: string;
+          try {
+            html = await docxExtractHtml(docxArrayBuffer);
+          } catch {
+            html = await docxToHtml(docxArrayBuffer);
+          }
+          setFolder((prev) => prev ? { ...prev, files: prev.files?.map((f) =>
+            f.id === currentFile.id ? { ...f, content: html } : f
+          )} : null);
+        } catch { /* 解析失败则不更新内容 */ }
+        return;
+      }
+
       // Markdown 或其他：读取文本内容
       const raw = await storageReadWorkspaceFile(folder.name, fileName);
       if (!raw) return;
@@ -213,16 +224,9 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
             f.id === currentFile.id ? { ...f, content: { data, colHeaders } } : f
           )} : null);
         } else {
-          try {
-            const parsed = JSON.parse(raw);
-            setFolder((prev) => prev ? { ...prev, files: prev.files?.map((f) =>
-              f.id === currentFile.id ? { ...f, content: parsed } : f
-            )} : null);
-          } catch {
-            setFolder((prev) => prev ? { ...prev, files: prev.files?.map((f) =>
-              f.id === currentFile.id ? { ...f, content: raw } : f
-            )} : null);
-          }
+          setFolder((prev) => prev ? { ...prev, files: prev.files?.map((f) =>
+            f.id === currentFile.id ? { ...f, content: parseMarkdownDiskContent(raw) } : f
+          )} : null);
         }
       } catch {
         setFolder((prev) => prev ? { ...prev, files: prev.files?.map((f) =>
@@ -235,17 +239,21 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
   // ─── 编辑器 hooks ────────────────────────────────────────────────────
   // useMarkdownEditor: 管理 raw markdown 源文本、自动保存、强制保存
   // useExcelEditor:    管理 Handsontable 实例生命周期、编辑栏同步、撤销/重做
-  // 两者通过 currentFile 判断是否激活（null 时不初始化编辑器）
-  const { source, setSource, handleForceSave, editorRef } = useMarkdownEditor(currentFile, folderId, folder?.name || null, saveStatus, setSaveStatus);
+  // useDocxEditor:     管理 Tiptap editor 实例生命周期、自动保存
+  const { source, setSource, handleForceSave: handleMarkdownForceSave, editorRef } = useMarkdownEditor(currentFile, folderId, folder?.name || null, saveStatus, setSaveStatus);
 
   // 切换标签页前保存当前文件
-  const prevFileRef = useRef(currentFileId);
+  const prevFileRef = useRef<{ id: string; type: string } | null>(null);
   useEffect(() => {
-    if (prevFileRef.current && prevFileRef.current !== currentFileId) {
-      if (currentFile?.type === "md") handleForceSave();
-      prevFileRef.current = currentFileId;
+    const prev = prevFileRef.current;
+    if (prev && prev.id !== currentFileId) {
+      if (prev.type === "md") handleMarkdownForceSave();
+      else if (prev.type === "excel") handleExcelForceSave();
+      else if (prev.type === "docx") handleDocxForceSave();
     }
-    if (!prevFileRef.current) prevFileRef.current = currentFileId;
+    if (currentFile) {
+      prevFileRef.current = { id: currentFile.id, type: currentFile.type };
+    }
   }, [currentFileId]);
 
   // 状态栏：直接操作 DOM，避免 React 重渲染
@@ -255,21 +263,46 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
   };
   useEffect(() => {
     if (!currentFile) { updateStatusBar(""); return; }
-    const type = currentFile.type === "md" ? "Markdown" : "Excel";
+    const type = currentFile.type === "md" ? "Markdown" : currentFile.type === "docx" ? "Word" : "Excel";
     updateStatusBar(`<span>${type}</span>`);
   }, [currentFile]);
-  const { hotRef, hotInstance, hotKey, cellRef, formulaValue, setFormulaValue, isFormulaBarFocused, handleUndo, handleRedo } =
+  const { hotRef, hotInstance, hotKey, cellRef, formulaValue, setFormulaValue, isFormulaBarFocused, saveStatus: excelSaveStatus, handleUndo, handleRedo, handleForceSave: handleExcelForceSave } =
     useExcelEditor(currentFile, folderId, folder?.name || null, reloadFolder);
+
+  // useDocxEditor: Tiptap 编辑器 hook（对标 useExcelEditor / useMarkdownEditor）
+  const { editorRef: docxEditorRef, saveStatus: docxSaveStatus, handleForceSave: handleDocxForceSave, handleEditorReady: handleDocxEditorReady } =
+    useDocxEditor(
+      currentFile?.type === "docx" ? currentFile : null,
+      folderId,
+      folder?.name || null,
+      (fileId, html) => {
+        // 保存后将最新内容写回 folder state，避免切回时读到旧 content
+        setFolder((prev) =>
+          prev
+            ? { ...prev, files: prev.files.map((f) => (f.id === fileId ? { ...f, content: html, updatedAt: Date.now() } : f)) }
+            : null
+        );
+      },
+    );
 
   // ─── 键盘快捷键 ──────────────────────────────────────────────────────
   // Ctrl+S / Cmd+S: 仅在 Markdown 文件激活时触发强制保存
   // Excel 使用 Handsontable 内置的 Ctrl+Z/Y 撤销/重做 + afterChange 自动保存
   const [isMdPreview, setIsMdPreview] = useState(false);
   const isMdFile = !!currentFile && currentFile.type === "md";
-  useKeyboardShortcuts(isMdFile ? handleForceSave : null, isMdFile && !!folderId);
+  const isDocxFile = !!currentFile && currentFile.type === "docx";
+  const effectiveSaveStatus = currentFile?.type === "docx" ? docxSaveStatus : currentFile?.type === "excel" ? excelSaveStatus : saveStatus;
+  const activeSaveHandler = getSaveHandler(currentFile?.type, {
+    md: handleMarkdownForceSave,
+    excel: handleExcelForceSave,
+    docx: handleDocxForceSave,
+  });
+  useKeyboardShortcuts(activeSaveHandler, !!activeSaveHandler && !!folderId);
   // ─── Tab 点击：切换当前文件 ────────────────────────────────────────────
-  const handleTabClick = (fileId: string) => {
-    if (currentFile?.type === "md") handleForceSave();
+  const handleTabClick = async (fileId: string) => {
+    if (currentFile?.type === "md") handleMarkdownForceSave();
+    else if (currentFile?.type === "excel") await handleExcelForceSave();
+    else if (currentFile?.type === "docx") await handleDocxForceSave();
     setCurrentFileId(fileId);
   };
 
@@ -302,10 +335,18 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
     (async () => {
       const f = await storageGetFolder(folderId);
       if (!f) { setError(t("folderNotFound", lang)); setLoading(false); return; }
-      // Electron: 从磁盘加载文件列表
+      // Electron: 从磁盘加载文件列表（保留内存中已有内容）
       if (isDisk) {
-        const { files, folders } = await storageListWorkspaceFiles(f.name);
-        f.files = files; f.folders = folders;
+        const { files: diskFiles, folders } = await storageListWorkspaceFiles(f.name);
+        const existingContentMap = new Map((f.files || []).map((ef: FolderFile) => [ef.name, ef.content]));
+        f.files = diskFiles.map((df: FolderFile) => {
+          const existing = existingContentMap.get(df.name);
+          if (existing && existing !== "" && existing !== df.content) {
+            return { ...df, content: existing };
+          }
+          return df;
+        });
+        f.folders = folders;
       }
       setFolder(f); setFolderName(f.name);
       try {
@@ -331,8 +372,24 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
     const f = await storageGetFolder(folderId);
     if (!f) return;
     if (isDisk) {
-      const { files, folders } = await storageListWorkspaceFiles(f.name);
-      f.files = files; f.folders = folders;
+      const { files: diskFiles, folders } = await storageListWorkspaceFiles(f.name);
+      // 保留 IndexedDB 中已有的文件内容 / 内存中未保存内容（磁盘扫描返回的是空占位 content）
+      const existingContentMap = new Map((f.files || []).map((ef) => [ef.name, ef.content]));
+      // 同时保留当前内存文件夹中的内容（folder state 可能比 IndexedDB 更新）
+      const memContentMap = new Map((folder?.files || []).map((mf) => [mf.name, mf.content]));
+      f.files = diskFiles.map((df) => {
+        // 优先使用内存中的最新内容，其次使用 IndexedDB 缓存
+        const mem = memContentMap.get(df.name);
+        if (mem && mem !== "" && mem !== df.content) {
+          return { ...df, content: mem };
+        }
+        const existing = existingContentMap.get(df.name);
+        if (existing && existing !== "" && existing !== df.content) {
+          return { ...df, content: existing };
+        }
+        return df;
+      });
+      f.folders = folders;
     }
     setFolder(f);
     // 刷新后重新匹配当前文件
@@ -419,13 +476,23 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
         if (!raw) continue;
         const data = csvToData(raw);
         // Try loading metadata
-        let cellMeta = undefined;
+        let cellMeta: any[][] | undefined = undefined;
         try {
           const metaRaw = await api.readFileAt(folderPath + "/" + entry.name + ".meta");
           if (metaRaw) cellMeta = JSON.parse(metaRaw).cellMeta;
         } catch {}
         const colHeaders = data[0] ? Array.from({ length: data[0].length }, (_, i) => String.fromCharCode(65 + i)) : [];
         files.push({ id: generateId(), name: entry.name, type: "excel", content: { data, colHeaders, cellMeta }, createdAt: Date.now(), updatedAt: Date.now() });
+      } else if (ext === "docx") {
+        const docxBase64 = await api.readFileAtBinary(folderPath + "/" + entry.name);
+        if (!docxBase64) continue;
+        try {
+          const docxArrayBuffer = base64ToArrayBuffer(docxBase64);
+          let html: string;
+          try { html = await docxExtractHtml(docxArrayBuffer); }
+          catch { html = await docxToHtml(docxArrayBuffer); }
+          files.push({ id: generateId(), name: entry.name, type: "docx", content: html, createdAt: Date.now(), updatedAt: Date.now() });
+        } catch { /* 解析失败跳过 */ }
       }
     }
     if (files.length === 0) { alert(t("noImportableFiles", lang)); return; }
@@ -573,16 +640,19 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
       if (type === "excel") {
         const emptyXlsx = await createEmptyXlsxBase64();
         await storageWriteWorkspaceFileBinary(folder.name, basename, emptyXlsx);
+      } else if (type === "docx") {
+        const emptyDocx = await htmlToDocxBase64(defaultDocxContent);
+        await storageWriteWorkspaceFileBinary(folder.name, basename, emptyDocx);
       } else {
-        await storageWriteWorkspaceFile(folder.name, basename, type === "docx" ? defaultDocxContent : "");
+        await storageWriteWorkspaceFile(folder.name, basename, "");
       }
-      const file: FolderFile = { id: fileId, name: basename, type, content: type === "md" ? defaultMdContent : type === "docx" ? defaultDocxContent : defaultExcelContent, createdAt: Date.now(), updatedAt: Date.now() };
+      const file: FolderFile = { id: fileId, name: basename, type, content: type === "md" ? makeDefaultMdContent() : type === "docx" ? defaultDocxContent : makeDefaultExcelContent(), createdAt: Date.now(), updatedAt: Date.now() };
       const files = [...(folder?.files || []), file];
       setFolder((prev) => prev ? { ...prev, files, updatedAt: Date.now() } : null);
       handleSelectTab(file.id);
       setNewFileId(file.id);
     } else {
-      const file: FolderFile = { id: fileId, name: basename, type, content: type === "md" ? defaultMdContent : type === "docx" ? defaultDocxContent : defaultExcelContent, createdAt: Date.now(), updatedAt: Date.now() };
+      const file: FolderFile = { id: fileId, name: basename, type, content: type === "md" ? makeDefaultMdContent() : type === "docx" ? defaultDocxContent : makeDefaultExcelContent(), createdAt: Date.now(), updatedAt: Date.now() };
       const files = [...(folder?.files || []), file];
       await storageUpdateFolder(folderId, { files, updatedAt: Date.now() });
       setFolder((prev) => prev ? { ...prev, files, updatedAt: Date.now() } : null);
@@ -610,7 +680,7 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
     const filtered = (folder.files || []).filter((f) => f.id !== fileId);
     if (!isDisk) await storageUpdateFolder(folderId, { files: filtered, updatedAt: Date.now() });
     setFolder((prev) => prev ? { ...prev, files: filtered, updatedAt: Date.now() } : null);
-    if (currentFileId === fileId) setCurrentFileId(filtered[0]?.id || null);
+    cleanupDeletedFile(fileId, filtered);
   };
 
   const handleCreateFolder = async (name: string) => {
@@ -645,6 +715,16 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
     const newFiles = (folder?.files || []).filter((f) => !f.name.startsWith(path + "/"));
     if (!isDisk) await storageUpdateFolder(folderId, { folders: newFolders, files: newFiles, updatedAt: Date.now() });
     setFolder((prev) => prev ? { ...prev, folders: newFolders, files: newFiles, updatedAt: Date.now() } : null);
+    const deletedFileIds = new Set((folder?.files || []).filter((f) => f.name.startsWith(path + "/")).map((f) => f.id));
+    setOpenTabs((prev) => {
+      const nextTabs = prev.filter((id) => !deletedFileIds.has(id));
+      if (currentFileId && deletedFileIds.has(currentFileId)) {
+        const nextFileId = newFiles[0]?.id || null;
+        if (nextFileId && !nextTabs.includes(nextFileId)) return [...nextTabs, nextFileId];
+      }
+      return nextTabs;
+    });
+    if (currentFileId && deletedFileIds.has(currentFileId)) setCurrentFileId(newFiles[0]?.id || null);
   };
 
   const handleMoveFolder = async (oldPath: string, targetPath: string) => {
@@ -720,15 +800,18 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
     alert(msg);
   };
 
-  const handleGoHome = () => { navigate("/"); };
+  const handleGoHome = async () => {
+    if (currentFile?.type === "docx") await handleDocxForceSave();
+    else if (currentFile?.type === "md") handleMarkdownForceSave();
+    else if (currentFile?.type === "excel") await handleExcelForceSave();
+    navigate("/");
+  };
   const handleGoWorkspace = () => { if (viewMode === "home" && selectedFolderId) navigate(`/folder/${selectedFolderId}`); };
 
   // 将处理函数暴露到 window 对象，供 TitleBar 的 "文件" 下拉菜单调用
   useEffect(() => {
     (window as any).__openWorkspace = handleOpenWorkspace;
-    (window as any).__saveFile = () => {
-      if (currentFile?.type === "md") handleForceSave();
-    };
+    (window as any).__saveFile = () => { void activeSaveHandler?.(); };
     (window as any).__saveAs = handleExportWorkspace;
     (window as any).__moveWorkspace = async () => {
       if (!folder || !isDisk) { alert(t("noWorkspaceToMove", lang)); return; }
@@ -743,7 +826,7 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
       (window as any).__saveAs = undefined;
       (window as any).__moveWorkspace = undefined;
     };
-  }, [handleOpenWorkspace, handleForceSave, handleExportWorkspace, currentFile, folder, isDisk, lang]);
+  }, [handleOpenWorkspace, activeSaveHandler, handleExportWorkspace, currentFile, folder, isDisk, lang]);
 
 
   // ─── Loading / Error states ─────────────────────────────────────────────
@@ -879,7 +962,7 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
                   isComposing={isComposing}
                   onRenameFile={handleRenameFile}
                   onFolderNameChange={setFolderName}
-                  saveStatus={saveStatus}
+                  saveStatus={effectiveSaveStatus}
                   isMdPreview={isMdPreview}
                   onTogglePreview={() => setIsMdPreview((p) => !p)}
                   editorRef={editorRef}
@@ -891,6 +974,7 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
                   formulaValue={formulaValue}
                   isFormulaBarFocused={isFormulaBarFocused}
                   onFormulaValueChange={setFormulaValue}
+                  docxEditor={docxEditorRef.current}
                 />
 
                 <div ref={wsZoomRef} data-workspace-zoom style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -903,6 +987,15 @@ function FolderWorkspace({ sidebarOpen = true, zoom = 110, contentZoom = 100, se
                     onTogglePreview={() => setIsMdPreview((p) => !p)}
                     fontFamily={mdFontFamily}
                   />
+                ) : currentFile?.type === "docx" ? (
+                  <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "auto" }}>
+                  <DocxEditor
+                    currentFile={currentFile}
+                    editorRef={docxEditorRef}
+                    onEditorReady={handleDocxEditorReady}
+                    scale={contentZoom / 100}
+                  />
+                  </div>
                 ) : (
                   <div className="hot-container" style={{ position: "relative", flex: 1, minHeight: 0 }}>
                     <div ref={hotRef} style={{ width: "100%", height: "100%" }}

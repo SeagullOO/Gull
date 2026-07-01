@@ -157,6 +157,14 @@ const DICT: Record<string, { zh: string; en: string }> = {
   recentColors: { zh: "最近使用", en: "Recent" },
   moreColors: { zh: "更多颜色", en: "More Colors" },
   resetToDefault: { zh: "重置为默认色", en: "Reset to Default" },
+  resetFontSize: { zh: "重置字号", en: "Reset Size" },
+
+  // ── DOCX Toolbar ──
+  pageMargins: { zh: "页边距", en: "Margins" },
+  marginsNormal: { zh: "标准", en: "Normal" },
+  marginsNarrow: { zh: "窄", en: "Narrow" },
+  marginsWide: { zh: "宽", en: "Wide" },
+  marginsCustom: { zh: "自定义...", en: "Custom..." },
 
   // ── Folder Workspace ──
   folderOptions: { zh: "文件夹选项", en: "Folder Options" },

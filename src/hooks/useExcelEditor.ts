@@ -40,15 +40,9 @@ import { restoreMetaUndo, pushMetaUndo } from "../hooks/useMetaUndo";
 import { dataToXlsxBase64, xlsxBase64ToData } from "../utils/xlsxUtils";
 import { KEYBINDINGS, matchesKey } from "../config";
 import type { FolderFile } from "../types";
+import { makeDefaultExcelContent, shouldLoadExcelData } from "../utils/defaultFileContent";
 
 /** 默认空 Excel 内容（26 列 x 100 行） */
-const defaultExcelContent = (() => {
-  const cols = 26, rows = 100;
-  const colHeaders = Array.from({ length: cols }, (_, i) => String.fromCharCode(65 + i));
-  const data = Array.from({ length: rows }, () => Array(cols).fill(""));
-  return { data, colHeaders };
-})();
-
 /**
  * 创建延迟自动保存函数
  *
@@ -62,7 +56,17 @@ const defaultExcelContent = (() => {
  * @param delay    防抖延迟（毫秒），默认 500ms
  * @returns 触发定时保存的函数（可多次调用）
  */
-function saveExcelContent(hot: any, folderId: number, folderName: string | null, fileId: string, fileName: string, currentFile: FolderFile | null, fmtMapRef: React.MutableRefObject<Record<string, Record<string, any>>>, delay = 500) {
+function createExcelSaver(
+  hot: any,
+  folderId: number,
+  folderName: string | null,
+  fileId: string,
+  fileName: string,
+  currentFile: FolderFile | null,
+  fmtMapRef: React.MutableRefObject<Record<string, Record<string, any>>>,
+  setSaveStatus: (status: "saved" | "saving" | "unsaved") => void,
+  delay = 500,
+) {
   let timer: ReturnType<typeof setTimeout>;
   /** 用于跟踪上一次成功保存的数据，避免重复写入相同内容 */
   let lastSavedContent = "";
@@ -92,9 +96,14 @@ function saveExcelContent(hot: any, folderId: number, folderName: string | null,
 
     // 快速检查：如果内容与上次保存的完全相同则跳过
     const contentFingerprint = JSON.stringify({ data, colHeaders, cellMeta: cellMetaArr });
-    if (contentFingerprint === lastSavedContent) return;
+    if (contentFingerprint === lastSavedContent) {
+      setSaveStatus("saved");
+      return;
+    }
 
-    if (folderName && (window as any).electronAPI) {
+    setSaveStatus("saving");
+    try {
+      if (folderName && (window as any).electronAPI) {
       // Electron: 序列化为 base64 xlsx 并写入二进制文件
       const xlsxBase64 = await dataToXlsxBase64(data, colHeaders, cellMetaArr);
       // 将文件名中的旧扩展名替换为 .xlsx
@@ -114,7 +123,7 @@ function saveExcelContent(hot: any, folderId: number, folderName: string | null,
 
       if (currentFile) { currentFile.content = newContent; currentFile.updatedAt = Date.now(); }
       lastSavedContent = contentFingerprint;
-    } else {
+      } else {
       // Browser/IndexedDB: 存储为 base64 xlsx 字符串
       const xlsxBase64 = await dataToXlsxBase64(data, colHeaders, cellMetaArr);
       const folder = await storageGetFolder(folderId);
@@ -124,9 +133,24 @@ function saveExcelContent(hot: any, folderId: number, folderName: string | null,
       );
       await storageUpdateFolder(folderId, { files, updatedAt: Date.now() });
       lastSavedContent = contentFingerprint;
+      }
+      setSaveStatus("saved");
+    } catch (error) {
+      setSaveStatus("unsaved");
+      throw error;
     }
   };
-  return () => { clearTimeout(timer); timer = setTimeout(save, delay); };
+  const scheduleSave = (_changes?: any[] | null, source?: string) => {
+    if (source === "loadData") return;
+    setSaveStatus("unsaved");
+    clearTimeout(timer);
+    timer = setTimeout(() => { void save(); }, delay);
+  };
+  const forceSave = async () => {
+    clearTimeout(timer);
+    await save();
+  };
+  return { scheduleSave, forceSave };
 }
 
 /**
@@ -147,11 +171,13 @@ export function useExcelEditor(currentFile: FolderFile | null, folderId: number 
   const [cellRef, setCellRef] = useState("");
 /** 编辑栏的当前值（与当前选中单元格内容同步） */
   const [formulaValue, setFormulaValue] = useState("");
+  const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "unsaved">("saved");
   /** 编辑栏是否获得焦点：聚焦时不覆盖用户正在编辑的值 */
   const isFormulaBarFocused = useRef(false);
   // 单元格格式表：key = "行,列"，value = { _color, _bgColor, ... }
   // 独立维护，不依赖 Handsontable 的 cellMeta 兼容性
   const fmtMap = useRef<Record<string, Record<string, any>>>({});
+  const forceSaveRef = useRef<(() => Promise<void>) | null>(null);
   /** 暴露给 ExcelToolbar 调用：记录格式变更 */
   const recordFmt = (r: number, c: number, key: string, val: any) => {
     const k = `${r},${c}`;
@@ -171,12 +197,13 @@ export function useExcelEditor(currentFile: FolderFile | null, folderId: number 
     if (!currentFile || currentFile.type !== "excel" || !hotRef.current) return;
     const H = (window as any).Handsontable;
     if (!H) return;
-    const content = currentFile.content || defaultExcelContent;
+    const fallbackContent = makeDefaultExcelContent();
+    const content = currentFile.content || fallbackContent;
     const isEmptyData = !content.data || !content.data.length || !content.data[0]?.length;
 
     // Handsontable 配置对象
     const config: any = {
-      data: isEmptyData ? defaultExcelContent.data : content.data,
+      data: isEmptyData ? fallbackContent.data : content.data,
       colHeaders: true, rowHeaders: true, colWidths: 100,
       height: "100%", width: "100%",
       licenseKey: "non-commercial-and-evaluation",
@@ -274,13 +301,14 @@ export function useExcelEditor(currentFile: FolderFile | null, folderId: number 
 
     setHotKey((k) => k + 1);
     // 注册自动保存 hook：监听所有数据/行列变化，500ms 防抖后保存
-    const saveFn = saveExcelContent(hot, folderId!, folderName, currentFile.id, currentFile.name, currentFile, fmtMap);
-    (window as any).__triggerExcelSave = saveFn;
-    hot.addHook("afterChange", saveFn);
-    hot.addHook("afterCreateRow", saveFn);
-    hot.addHook("afterCreateCol", saveFn);
-    hot.addHook("afterRemoveRow", saveFn);
-    hot.addHook("afterRemoveCol", saveFn);
+    const saver = createExcelSaver(hot, folderId!, folderName, currentFile.id, currentFile.name, currentFile, fmtMap, setSaveStatus);
+    forceSaveRef.current = saver.forceSave;
+    (window as any).__triggerExcelSave = saver.scheduleSave;
+    hot.addHook("afterChange", saver.scheduleSave);
+    hot.addHook("afterCreateRow", saver.scheduleSave);
+    hot.addHook("afterCreateCol", saver.scheduleSave);
+    hot.addHook("afterRemoveRow", saver.scheduleSave);
+    hot.addHook("afterRemoveCol", saver.scheduleSave);
 
     // ── 编辑栏同步 + 选区边界样式 ──
     // afterSelection: 更新编辑栏显示（单元格引用 + 值），同时为选区边缘添加边界 class
@@ -354,7 +382,13 @@ export function useExcelEditor(currentFile: FolderFile | null, folderId: number 
     return () => {
       // 清理：断开 ResizeObserver → 执行最后一次保存 → 销毁 Handsontable 实例
       ro.disconnect();
-      saveFn();
+      void saver.forceSave();
+      if ((window as any).__triggerExcelSave === saver.scheduleSave) {
+        (window as any).__triggerExcelSave = undefined;
+      }
+      if (forceSaveRef.current === saver.forceSave) {
+        forceSaveRef.current = null;
+      }
       if (hot && !hot.isDestroyed) hot.destroy();
     };
     // currentFile?.id 是唯一依赖项：仅当切换到不同文件时才重建编辑器
@@ -406,10 +440,7 @@ export function useExcelEditor(currentFile: FolderFile | null, folderId: number 
 
     // 如果数据维度与当前不同（从占位变为实际数据），加载数据
     if (contentData && contentData.length > 0 && contentData[0]?.length > 0) {
-      const currentRows = hot.countRows();
-      const currentCols = hot.countCols();
-      const isPlaceholder = currentRows <= 1 && currentCols <= 1;
-      if (isPlaceholder || contentData.length !== currentRows || contentData[0].length !== currentCols) {
+      if (shouldLoadExcelData(hot.getData(), contentData)) {
         hot.loadData(contentData);
       }
     }
@@ -445,5 +476,9 @@ export function useExcelEditor(currentFile: FolderFile | null, folderId: number 
     hot.redo();
   }, []);
 
-  return { hotRef, hotInstance, hotKey, cellRef, formulaValue, setFormulaValue, isFormulaBarFocused, handleUndo, handleRedo };
+  const handleForceSave = useCallback(async () => {
+    await forceSaveRef.current?.();
+  }, []);
+
+  return { hotRef, hotInstance, hotKey, cellRef, formulaValue, setFormulaValue, isFormulaBarFocused, saveStatus, handleUndo, handleRedo, handleForceSave };
 }

@@ -11,11 +11,14 @@ import mammoth from "mammoth";
 import JSZip from "jszip";
 import { arrayBufferToBase64 } from "./xlsxUtils";
 
-type MammothFull = typeof mammoth & {
-  convertToHtml(input: { buffer: Buffer }): Promise<{ value: string; messages: unknown[] }>;
-};
-
-const m = mammoth as MammothFull;
+/**
+ * mammoth 在浏览器/Electron 渲染进程使用 { arrayBuffer }，
+ * 在 Node.js 使用 { buffer }。Electron contextIsolation 下无 Buffer。
+ */
+export async function docxToHtml(arrayBuffer: ArrayBuffer): Promise<string> {
+  const result = await mammoth.convertToHtml({ arrayBuffer } as any);
+  return result.value;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // altChunk DOCX 容器模板（最小可用 .docx 结构）
@@ -50,18 +53,6 @@ const DOCUMENT_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 </w:document>`;
 
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 导入方向：.docx 二进制 → HTML
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * .docx ArrayBuffer → HTML 字符串
- */
-export async function docxToHtml(buffer: ArrayBuffer): Promise<string> {
-  const result = await m.convertToHtml({ buffer: Buffer.from(buffer) });
-  return result.value;
-}
-
 /**
  * 清理 mammoth 输出的 HTML，仅移除 MS Office 特有标记
  *
@@ -72,7 +63,6 @@ export async function docxToHtml(buffer: ArrayBuffer): Promise<string> {
 export function sanitizeDocxHtml(html: string): string {
   return html
     .replace(/<img[^>]*>/gi, "[图片]")
-    .replace(/<br\s*\/?>/gi, "<br>")
     .replace(/<hr[^>]*>/gi, "<p>---</p>")
     // 仅剥离 mammoth/MS 专属的 CSS 属性（mso-* 前缀），保留 text-align 等标准属性
     .replace(/mso-[^;";]*(;?\s*)/gi, "")
@@ -158,7 +148,10 @@ export async function docxExtractHtml(buffer: ArrayBuffer): Promise<string> {
   const zip = await JSZip.loadAsync(buffer);
   const file = zip.file("word/gull-content.html");
   if (!file) throw new Error("Not a Gull-generated DOCX");
-  return file.async("string");
+  const raw = await file.async("string");
+  // 提取 <body>...</body> 内容，供 Tiptap editor.setContent() 使用
+  const m = raw.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+  return m ? m[1].trim() : raw;
 }
 
 /**

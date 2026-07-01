@@ -1,5 +1,104 @@
 /** @file tiptap.css — Tiptap / ProseMirror 富文本编辑器样式 */
 
+/* ── PageWrapper 暗色模式适配 ── */
+:root:not(.light) .page-wrapper-container {
+  background: var(--bg-root) !important;
+}
+
+/* 增大可视区域：覆盖库的 min-height:100vh 和 40px padding */
+.page-wrapper-container {
+  min-height: 0 !important;
+  padding: 24px 20px !important;
+}
+
+:root:not(.light) .page-wrapper-page {
+  background: #2b2b2b;
+}
+
+:root:not(.light) .page-wrapper-page .ProseMirror {
+  color: #dadada;
+}
+
+:root:not(.light) .page-wrapper-page .ProseMirror a {
+  color: var(--accent);
+}
+
+:root:not(.light) .page-wrapper-page .ProseMirror blockquote {
+  color: #b0b0b0;
+}
+
+:root:not(.light) .page-wrapper-page .ProseMirror th {
+  background: #333;
+  border-color: #555;
+}
+
+:root:not(.light) .page-wrapper-page .ProseMirror td {
+  border-color: #555;
+}
+
+:root:not(.light) .page-wrapper-page .ProseMirror code {
+  background: #333;
+  color: var(--accent);
+}
+
+:root:not(.light) .page-wrapper-page .ProseMirror pre {
+  background: #333;
+}
+
+/* 分页符标记 */
+.page-break::before {
+  background: var(--bg-surface, #fff);
+  border-color: var(--border-subtle, #e5e7eb);
+  color: var(--text-secondary, #6b7280);
+}
+
+.page-break::after {
+  border-top-color: var(--border-subtle, #d1d5db);
+}
+
+:root:not(.light) .page-break::before {
+  background: #2b2b2b;
+  border-color: #444;
+  color: #999;
+}
+
+:root:not(.light) .page-break::after {
+  border-top-color: #555;
+}
+
+.page-break.ProseMirror-selectednode {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ── Pagination 自动分页元素暗色适配 ──
+   库通过 JS 动态创建这些元素，并设 inline style="background:white; box-shadow:..."
+   CSS 必须用 !important 才能覆盖内联样式 */
+:root:not(.light) .ctp-pages-first-header,
+:root:not(.light) .ctp-pages-header,
+:root:not(.light) .ctp-pages-footer,
+:root:not(.light) .ctp-pages-last-footer,
+:root:not(.light) .ctp-pages-last-filler {
+  background: #2b2b2b !important;
+  color: #999 !important;
+  box-shadow: none !important;
+}
+
+:root:not(.light) .ctp-pages-break {
+  background: #2b2b2b !important;
+  border-bottom-color: #444 !important;
+}
+
+:root:not(.light) .ctp-pages-gap {
+  background: var(--bg-root) !important;
+}
+
+/* last footer content: 页码 */
+:root:not(.light) .ctp-pages-last-footer-content {
+  background: #2b2b2b !important;
+  color: #999 !important;
+}
+
 /* ── Tiptap / ProseMirror editor ── */
 .ProseMirror {
   color: var(--text-primary);
